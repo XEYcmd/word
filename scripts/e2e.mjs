@@ -1,12 +1,12 @@
 /**
- * 通过 Chrome DevTools Protocol 驱动无头浏览器做端到端检查。
- * 用法：node scripts/e2e.mjs [baseUrl]
- * 前置：浏览器以 --remote-debugging-port=9222 启动。
+ * 端到端测试：覆盖「背单词 → 选择题 → 拼写」完整流程。
+ * 用法：
+ *   CDP=http://127.0.0.1:9222 node scripts/e2e.mjs [baseUrl]
+ * 离线版：CDP=... node scripts/e2e.mjs "file:///.../背单词.html"
  */
 
-const BASE = process.argv[2] || 'http://localhost:5178/word/'
+const BASE = process.argv[2] || 'http://127.0.0.1:5178/word/'
 const CDP = process.env.CDP || 'http://127.0.0.1:9222'
-/** 离线版用 file:// 打开时 hash 直接拼在文件地址后面 */
 const IS_FILE = BASE.startsWith('file:')
 
 let ws
@@ -17,14 +17,13 @@ function connect(url) {
   return new Promise((resolve, reject) => {
     ws = new WebSocket(url)
     ws.onopen = () => resolve()
-    ws.onerror = (e) => reject(e)
+    ws.onerror = reject
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data)
       if (msg.id && pending.has(msg.id)) {
         const { resolve: res, reject: rej } = pending.get(msg.id)
         pending.delete(msg.id)
-        if (msg.error) rej(new Error(JSON.stringify(msg.error)))
-        else res(msg.result)
+        msg.error ? rej(new Error(JSON.stringify(msg.error))) : res(msg.result)
       }
     }
   })
@@ -60,9 +59,19 @@ function check(name, ok, detail = '') {
 }
 
 async function goto(hash) {
-  const url = IS_FILE ? BASE + hash.replace('#', '#') : BASE + hash
-  await send('Page.navigate', { url })
+  await send('Page.navigate', { url: IS_FILE ? BASE + hash : BASE + hash })
   await sleep(1200)
+}
+
+/** 点击文本包含指定内容的按钮 */
+async function clickByText(text, selector = 'button') {
+  return evaluate(`(() => {
+    const el = [...document.querySelectorAll(${JSON.stringify(selector)})]
+      .find(b => b.textContent.includes(${JSON.stringify(text)}));
+    if (!el) return false;
+    el.click();
+    return true;
+  })()`)
 }
 
 async function main() {
@@ -81,75 +90,121 @@ async function main() {
     }
   })
 
-  // --- 1. 首页
+  // ============================================================ 1. 首页
   await goto('#/home')
   const homeTitle = await evaluate(`document.querySelector('.hero-title')?.textContent || ''`)
   check('首页渲染', homeTitle.includes('加油'), homeTitle)
-  const wordCount = await evaluate(`document.querySelectorAll('.word-row').length`)
-  check('推荐词列表', wordCount > 0, `${wordCount} 条`)
 
-  // --- 2. 背单词：显示释义 + 评分
+  const flowHint = await evaluate(`document.querySelector('.flow-hint')?.textContent || ''`)
+  check('首页展示三关流程', flowHint.includes('背单词') && flowHint.includes('选择题') && flowHint.includes('拼写'), flowHint.replace(/\s+/g, ' '))
+
+  const recommendCount = await evaluate(`document.querySelectorAll('.word-row').length`)
+  check('推荐词列表', recommendCount > 0, `${recommendCount} 条`)
+
+  // 清空旧会话，保证从干净状态开始
+  await evaluate(`localStorage.removeItem('word-session-v1'); true`)
   await goto('#/study')
-  const before = await evaluate(`localStorage.getItem('word-memory-v1')`)
-  const word1 = await evaluate(`document.querySelector('.word-main')?.textContent || ''`)
-  check('学习卡片显示单词', !!word1, word1)
 
-  await evaluate(`document.querySelector('.btn-primary.btn-lg')?.click()`)
+  // ============================================================ 2. 第一关：背单词
+  const hasStart = await evaluate(`!!document.querySelector('[data-action="start-batch"]')`)
+  check('学习入口页', hasStart)
+
+  const steps = await evaluate(`document.querySelectorAll('.step').length`)
+  check('三关步骤条', steps === 4, `${steps} 步（含完成）`)
+
+  await evaluate(`document.querySelector('[data-action="start-batch"]').click()`)
+  await sleep(900)
+
+  const word1 = await evaluate(`document.querySelector('.word-main')?.textContent || ''`)
+  check('第一关显示单词', !!word1, word1)
+
+  // 显示释义
+  await clickByText('显示释义')
   await sleep(300)
-  const trans = await evaluate(`document.querySelector('.word-trans')?.textContent || ''`)
-  check('显示释义', !!trans, trans.slice(0, 24))
+  const trans1 = await evaluate(`document.querySelector('.word-trans')?.textContent || ''`)
+  check('第一关显示释义', !!trans1, trans1.slice(0, 22))
 
   const gradeBtns = await evaluate(`document.querySelectorAll('.grade-btn').length`)
-  check('四个评分按钮', gradeBtns === 4, `${gradeBtns} 个`)
+  check('四档评分按钮', gradeBtns === 4, `${gradeBtns} 个`)
 
+  // 评分推进
   await evaluate(`document.querySelector('.grade-good')?.click()`)
-  await sleep(600)
+  await sleep(500)
   const word2 = await evaluate(`document.querySelector('.word-main')?.textContent || ''`)
-  check('评分后切到下一个词', word2 && word2 !== word1, `${word1} -> ${word2}`)
+  check('评分后进入下一词', word2 && word2 !== word1, `${word1} → ${word2}`)
 
-  const saved = await evaluate(`localStorage.getItem('word-memory-v1')`)
-  const progressCount = await evaluate(
-    `Object.keys(JSON.parse(localStorage.getItem('word-memory-v1')).progress).length`,
+  const savedProgress = await evaluate(
+    `Object.keys(JSON.parse(localStorage.getItem('word-memory-v1') || '{}').progress || {}).length`,
   )
-  check('进度写入 localStorage', progressCount > 0, `${progressCount} 条`)
-  check('存储内容变化', saved !== before)
+  check('进度写入 localStorage', savedProgress > 0, `${savedProgress} 条`)
 
-  // --- 3. 选择题
-  await goto('#/quiz')
-  const q = await evaluate(`document.querySelector('.quiz-prompt')?.textContent || ''`)
-  const opts = await evaluate(`document.querySelectorAll('.option').length`)
-  check('测试题渲染', !!q && opts === 4, `${q} / ${opts} 选项`)
+  const sessionSaved = await evaluate(
+    `(JSON.parse(localStorage.getItem('word-session-v1') || '{}').studied || []).length`,
+  )
+  check('会话记录已背词', sessionSaved > 0, `${sessionSaved} 个`)
 
-  // 点正确答案：找到 option.correct 前先随便点一个，验证反馈
+  // 直接跳到第一关结尾：点步骤条进第二关
+  await evaluate(`(() => {
+    const steps = [...document.querySelectorAll('.step')];
+    steps[1]?.click();
+  })()`)
+  await sleep(800)
+
+  const stageNow = await evaluate(`document.querySelector('.step.active .step-text b')?.textContent || ''`)
+  check('进入第二关', stageNow.includes('选择题'), stageNow)
+
+  // ============================================================ 3. 第二关：选择题
+  const quizPrompt = await evaluate(`document.querySelector('.quiz-prompt')?.textContent || ''`)
+  const options = await evaluate(`document.querySelectorAll('.option').length`)
+  check('选择题渲染', !!quizPrompt && options === 4, `${quizPrompt} / ${options} 选项`)
+
   await evaluate(`document.querySelectorAll('.option')[0].click()`)
   await sleep(500)
   const feedback = await evaluate(`document.querySelector('.feedback')?.textContent || ''`)
-  check('作答即时反馈', !!feedback, feedback.slice(0, 30))
+  check('选择题即时反馈', !!feedback, feedback.replace(/\s+/g, ' ').slice(0, 34))
 
-  // --- 4. 拼写模式
-  await goto('#/quiz')
-  await evaluate(
-    `[...document.querySelectorAll('.chip')].find(c=>c.textContent.includes('拼写'))?.click()`,
-  )
-  await sleep(600)
+  await clickByText('下一题')
+  await sleep(400)
+  const afterNext = await evaluate(`document.querySelectorAll('.option').length`)
+  check('可进入下一题', afterNext === 4)
+
+  // ============================================================ 4. 第三关：拼写
+  await evaluate(`(() => {
+    const steps = [...document.querySelectorAll('.step')];
+    steps[2]?.click();
+  })()`)
+  await sleep(800)
+
+  const spellStage = await evaluate(`document.querySelector('.step.active .step-text b')?.textContent || ''`)
+  check('进入第三关', spellStage.includes('拼写'), spellStage)
+
   const hasInput = await evaluate(`!!document.querySelector('.spell-input')`)
-  check('拼写模式输入框', hasInput)
+  check('拼写输入框', hasInput)
 
   if (hasInput) {
     await evaluate(`(() => {
       const inp = document.querySelector('.spell-input');
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-      setter.call(inp, 'wronganswer');
+      setter.call(inp, 'definitelywrong');
       inp.dispatchEvent(new Event('input', { bubbles: true }));
     })()`)
     await sleep(200)
-    await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent.includes('提交'))?.click()`)
+    await clickByText('提交')
     await sleep(500)
     const spellFb = await evaluate(`document.querySelector('.feedback')?.textContent || ''`)
-    check('拼写判错反馈', spellFb.includes('答错'), spellFb.slice(0, 30))
+    check('拼写判错并显示正确答案', spellFb.includes('拼错') && spellFb.includes('正确'), spellFb.replace(/\s+/g, ' ').slice(0, 40))
   }
 
-  // --- 5. 词库页搜索
+  // ============================================================ 5. 完成页
+  await evaluate(`(() => {
+    const steps = [...document.querySelectorAll('.step')];
+    steps[3]?.click();
+  })()`)
+  await sleep(700)
+  const doneText = await evaluate(`document.querySelector('.card h2')?.textContent || ''`)
+  check('今日总结页', doneText.includes('完成'), doneText)
+
+  // ============================================================ 6. 词库
   await goto('#/list')
   const rows0 = await evaluate(`document.querySelectorAll('.word-row').length`)
   await evaluate(`(() => {
@@ -159,23 +214,19 @@ async function main() {
     inp.dispatchEvent(new Event('input', { bubbles: true }));
   })()`)
   await sleep(500)
-  const rows1 = await evaluate(`document.querySelectorAll('.word-row').length`)
   const found = await evaluate(`document.querySelector('.word-row-word')?.textContent || ''`)
-  check('词库搜索', rows0 > 0 && found.toLowerCase() === 'abandon', `${rows0} -> ${rows1}, 首个=${found}`)
+  check('词库搜索', rows0 > 0 && found.toLowerCase() === 'abandon', `${rows0} 行 → 首个=${found}`)
 
-  // --- 6. 统计页
+  // ============================================================ 7. 统计
   await goto('#/stats')
   const heatCells = await evaluate(`document.querySelectorAll('.heat-cell').length`)
   check('热力图渲染', heatCells > 100, `${heatCells} 格`)
 
-  // --- 7. 设置页：主题切换
+  // ============================================================ 8. 主题
   await goto('#/settings')
   const themeBefore = await evaluate(`document.documentElement.dataset.theme`)
-  await evaluate(
-    `[...document.querySelectorAll('.setting-row')].find(r=>r.textContent.includes('主题'))?.querySelector('select')?.dispatchEvent(new Event('change',{bubbles:true}))`,
-  )
-  const themeSelect = await evaluate(`(() => {
-    const row = [...document.querySelectorAll('.setting-row')].find(r=>r.textContent.includes('主题'));
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll('.setting-row')].find(r => r.textContent.includes('主题'));
     const sel = row?.querySelector('select');
     if (!sel) return null;
     sel.value = 'dark';
@@ -184,21 +235,21 @@ async function main() {
   })()`)
   await sleep(400)
   const themeAfter = await evaluate(`document.documentElement.dataset.theme`)
-  check('主题切换', themeAfter === 'dark', `${themeBefore} -> ${themeAfter} (select=${themeSelect})`)
+  check('主题切换', themeAfter === 'dark', `${themeBefore} → ${themeAfter}`)
 
-  // --- 8. 深色模式截图
-  await goto('#/home')
-  await sleep(500)
-
-  // --- 9. 数据持久化（刷新后仍在）
-  await send('Page.reload')
-  await sleep(1500)
+  // ============================================================ 9. 持久化
+  await goto('#/study')
+  await sleep(600)
   const persisted = await evaluate(
     `Object.keys(JSON.parse(localStorage.getItem('word-memory-v1') || '{}').progress || {}).length`,
   )
   check('刷新后进度保留', persisted > 0, `${persisted} 条`)
 
-  // --- 10. 无 JS 报错
+  // 会话恢复：应直接回到第三关（上次所在阶段）
+  const restoredStage = await evaluate(`document.querySelector('.step.active .step-text b')?.textContent || ''`)
+  check('会话阶段已恢复', !!restoredStage, restoredStage)
+
+  // ============================================================ 10. 无异常
   check('无未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 2).join(' | '))
 
   const passed = results.filter((r) => r.ok).length

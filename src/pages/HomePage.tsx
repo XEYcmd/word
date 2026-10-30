@@ -50,11 +50,19 @@ export default function HomePage({ go }: { go: (r: Route) => void }) {
             {meta.count} 词（核心 {meta.core} / 拓展 {meta.extended}）
           </p>
 
-          <div className="row" style={{ gap: 8, marginBottom: 16 }}>
+          <div className="row wrap" style={{ gap: 10, marginBottom: 16 }}>
             <span className="chip active">今日 {done}</span>
             <span className="chip">新词 {t.learned}</span>
             <span className="chip">复习 {t.reviewed}</span>
             <span className="chip">正确率 {t.correct + t.wrong > 0 ? Math.round((t.correct / (t.correct + t.wrong)) * 100) : 0}%</span>
+          </div>
+
+          <div className="flow-hint">
+            <span className="flow-step"><b>1</b> 背单词</span>
+            <span className="flow-arrow">→</span>
+            <span className="flow-step"><b>2</b> 选择题</span>
+            <span className="flow-arrow">→</span>
+            <span className="flow-step"><b>3</b> 拼写</span>
           </div>
 
           <div className="progress-bar" style={{ marginBottom: 8 }}>
@@ -66,10 +74,10 @@ export default function HomePage({ go }: { go: (r: Route) => void }) {
 
           <div className="row wrap" style={{ gap: 10 }}>
             <button className="btn btn-primary btn-lg" onClick={() => go('study')}>
-              {stats.due > 0 ? `开始复习 ${stats.due} 词` : '开始背单词'}
+              {stats.due > 0 ? `开始今日学习（复习 ${stats.due}）` : '开始今日学习'}
             </button>
-            <button className="btn btn-ghost btn-lg" onClick={() => go('quiz')}>
-              测试一下
+            <button className="btn btn-ghost btn-lg" onClick={() => go('list')}>
+              浏览词库
             </button>
           </div>
         </div>

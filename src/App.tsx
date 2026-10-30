@@ -3,18 +3,16 @@ import { useApp } from './lib/store'
 import { allWords, meta } from './lib/bank'
 import HomePage from './pages/HomePage'
 import StudyPage from './pages/StudyPage'
-import QuizPage from './pages/QuizPage'
 import ListPage from './pages/ListPage'
 import StatsPage from './pages/StatsPage'
 import SettingsPage from './pages/SettingsPage'
 import { dateKey } from './lib/storage'
 
-export type Route = 'home' | 'study' | 'quiz' | 'list' | 'stats' | 'settings'
+export type Route = 'home' | 'study' | 'list' | 'stats' | 'settings'
 
 const NAV: { key: Route; label: string; icon: string }[] = [
   { key: 'home', label: '首页', icon: '🏠' },
-  { key: 'study', label: '背单词', icon: '🃏' },
-  { key: 'quiz', label: '测试', icon: '✍️' },
+  { key: 'study', label: '开始学习', icon: '🃏' },
   { key: 'list', label: '词库', icon: '📚' },
   { key: 'stats', label: '统计', icon: '📊' },
   { key: 'settings', label: '设置', icon: '⚙️' },
@@ -166,7 +164,6 @@ export default function App() {
         <main className="content">
           {route === 'home' && <HomePage go={go} />}
           {route === 'study' && <StudyPage />}
-          {route === 'quiz' && <QuizPage />}
           {route === 'list' && <ListPage />}
           {route === 'stats' && <StatsPage />}
           {route === 'settings' && <SettingsPage />}
