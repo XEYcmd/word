@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-offline/
+.vite/
+*.local
+.DS_Store
+Thumbs.db
+
+# 截图与中间产物
+data/shots/
+data/raw/ecdict.csv
