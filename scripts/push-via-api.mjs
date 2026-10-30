@@ -126,13 +126,14 @@ async function main() {
   const localSet = new Set(files)
   const deletions = []
   for (const p of remoteBlobs.keys()) {
-    if (!localSet.has(p) && !p.startsWith('.github/')) {
-      // 保留 .github 下的历史文件，其余按本地为准
-      if (p === 'src/pages/QuizPage.tsx') deletions.push(p)
-    }
+    if (localSet.has(p)) continue
+    // .github 下的历史文件保留，其余以本地为准
+    if (p.startsWith('.github/')) continue
+    deletions.push(p)
   }
   for (const p of deletions) {
     console.log('  待删除:', p)
+    treeEntries.push({ path: p, mode: '100644', type: 'blob', sha: null })
   }
 
   if (DRY || (treeEntries.length === 0 && deletions.length === 0)) {
