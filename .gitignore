@@ -9,3 +9,6 @@ Thumbs.db
 # 截图与中间产物
 data/shots/
 data/raw/ecdict.csv
+
+# TypeScript 增量构建信息
+tsconfig.tsbuildinfo

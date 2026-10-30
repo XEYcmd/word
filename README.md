@@ -1,6 +1,13 @@
 # 高中必背 3600 词 · 背单词
 
-一个纯前端、零依赖后端的高中英语单词背诵网站。**在线版**部署在 GitHub Pages，**离线版**是单个 HTML 文件，双击就能用。
+一个纯前端、零后端的高中英语单词背诵应用，提供三种形态：
+
+| 形态 | 入口 | 说明 |
+| --- | --- | --- |
+| 🌐 在线版 | <https://xeycmd.github.io/word/> | GitHub Pages 自动部署，手机/电脑浏览器直接用 |
+| 📱 PWA 安装版 | 同上，浏览器菜单「安装应用 / 添加到主屏幕」 | 装成独立 App，断网可用 |
+| 💾 离线单文件 | [`背单词.html`](./背单词.html)（约 800 KB） | 双击即用，无需服务器、无需联网 |
+| 🖥 桌面安装包 | Actions → Build Desktop App | Windows `.msi/.exe`、macOS `.dmg`、Linux `.deb/.AppImage` |
 
 > 词库共 **3855 词**（高考 3500 词表 + 人教版教材单元标注），核心高频 1933 / 拓展 1922。
 
@@ -27,24 +34,34 @@
 
 ## 🚀 使用
 
-### 在线版
+### 在线版 / 安装成 App
 
-访问 GitHub Pages：<https://xeycmd.github.io/word/>
+访问 <https://xeycmd.github.io/word/>。
+Chrome / Edge 地址栏右侧点「安装」，或在手机浏览器菜单里选「添加到主屏幕」，之后可像原生 App 一样全屏使用，**断网也能打开**（Service Worker 已缓存全部资源）。
 
-### 离线版（推荐给没网的环境）
+### 离线单文件（推荐给没网的环境）
 
-下载 [`背单词.html`](./背单词.html)（约 800 KB），**双击即可打开**，无需服务器、无需联网。
+下载 [`背单词.html`](./背单词.html)，**双击即可打开**，无需服务器、无需联网。
 词库、样式、脚本全部内嵌在这一个文件里，进度保存在浏览器 localStorage。
 
-> 手机端：把 HTML 文件传到手机，用浏览器打开即可；也可用「添加到主屏幕」。
+> 手机端：把 HTML 文件传到手机，用浏览器打开即可。
+
+### 桌面安装包
+
+仓库自带 GitHub Actions 工作流 `.github/workflows/build-app.yml`（基于 Tauri 2）：
+在 Actions 页面手动触发 **Build Desktop App**，或在本地装好 Rust 后执行 `npm run build:app`。
+产物在 `src-tauri/target/release/bundle/`（Windows 为 `.msi` / `-setup.exe`）。
+
+> 说明：本机没有安装 Rust 工具链，所以安装包由 CI 构建，不需要你本地准备环境。
 
 ### 本地开发
 
 ```bash
-npm install          # 安装依赖（已配置 npmmirror 镜像）
-npm run dev          # 开发服务器 http://localhost:5178/word/
-npm run build        # 构建在线版 -> dist/
+npm install           # 安装依赖（已配置 npmmirror 镜像）
+npm run dev           # 开发服务器 http://127.0.0.1:5178/word/
+npm run build         # 构建在线版 -> dist/
 npm run build:offline # 构建离线单文件 -> dist-offline/背单词.html
+npm run build:app     # 构建桌面安装包（需要 Rust）
 ```
 
 ---
@@ -91,6 +108,7 @@ python data/emit_ts.py       # 转成前端模块 src/data/words.ts
 │   ├── emit_ts.py          # JSON -> TS 模块
 │   ├── words.json          # 构建产物
 │   └── raw/                # 原始词表
+├── public/                 # 图标、manifest、Service Worker
 ├── src/
 │   ├── pages/              # 首页 / 背单词 / 测试 / 词库 / 统计 / 设置
 │   ├── lib/
@@ -99,30 +117,45 @@ python data/emit_ts.py       # 转成前端模块 src/data/words.ts
 │   │   ├── storage.ts      # localStorage 持久化
 │   │   ├── speech.ts       # TTS 发音
 │   │   ├── groups.ts       # 分组、干扰项生成
+│   │   ├── worth.ts        # 过滤功能词（a/the/of 等不进学习队列）
 │   │   └── store.tsx       # 全局状态
 │   └── data/words.ts       # 内嵌词库（自动生成）
+├── src-tauri/              # 桌面版（Tauri 2）
 ├── scripts/
 │   ├── make-offline.mjs    # 离线单文件打包
-│   └── e2e.mjs             # 浏览器端到端自测（CDP）
-└── .github/workflows/      # 自动部署到 Pages
+│   ├── make_icons.py       # 站点图标生成
+│   ├── make_tauri_icons.py # 桌面图标生成
+│   ├── e2e.mjs             # 端到端测试（CDP）
+│   └── pwa-check.mjs       # PWA 离线能力检查
+└── .github/workflows/      # Pages 部署 + 桌面安装包构建
 ```
 
 ---
 
 ## 🧪 自测
 
-项目带一份基于 Chrome DevTools Protocol 的端到端测试（17 项断言，覆盖渲染、答题、评分、持久化、搜索、主题切换）：
+项目带两套基于 Chrome DevTools Protocol 的自动化测试：
+
+**端到端功能测试**（17 项断言：渲染、答题、评分、持久化、搜索、主题切换）
 
 ```bash
-# 1. 启动开发服务器
 npm run dev
-# 2. 用无头浏览器打开并开启调试端口
-msedge --headless=new --remote-debugging-port=9222 --user-data-dir=/tmp/e2e "http://localhost:5178/word/"
-# 3. 运行测试
+# 另开终端：用无头浏览器打开并开启调试端口
+msedge --headless=new --remote-debugging-port=9222 --user-data-dir=/tmp/e2e "http://127.0.0.1:5178/word/"
 node scripts/e2e.mjs
 ```
 
 离线版同样可测：`CDP=http://127.0.0.1:9223 node scripts/e2e.mjs "file:///.../背单词.html"`
+
+**PWA 检查**（5 项：manifest、SW 注册与激活、断网后仍可打开）
+
+```bash
+npm run build && npx vite preview --port 4179
+msedge --headless=new --remote-debugging-port=9226 --user-data-dir=/tmp/pwa "http://127.0.0.1:4179/word/"
+CDP=http://127.0.0.1:9226 node scripts/pwa-check.mjs http://127.0.0.1:4179/word/
+```
+
+当前状态：**在线版 17/17、离线版 17/17、PWA 5/5 全部通过**。
 
 ---
 
