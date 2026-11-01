@@ -1,6 +1,10 @@
 /**
  * 通过 GitHub REST API 提交本地文件（绕过 git 协议，仅需 api.github.com 可达）。
- * 用法：node scripts/push-via-api.mjs [--dry]
+ *
+ * 注意：如果本机有 TLS 中间层，Node 会报 UNABLE_TO_VERIFY_LEAF_SIGNATURE，
+ *       此时需要用 `node --use-system-ca scripts/push-via-api.mjs` 运行。
+ *
+ * 用法：node --use-system-ca scripts/push-via-api.mjs [--dry]
  */
 import fs from 'node:fs'
 import path from 'node:path'
