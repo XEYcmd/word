@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-offline/
+dist-app/
 .vite/
 *.local
 .DS_Store
@@ -12,3 +13,9 @@ data/raw/ecdict.csv
 
 # TypeScript 增量构建信息
 tsconfig.tsbuildinfo
+
+# Android 本地配置（SDK 路径因机器而异）
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/

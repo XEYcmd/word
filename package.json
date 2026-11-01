@@ -3,21 +3,29 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "高中必背 3600 词 · 背单词网站（在线版 + 单文件离线版 + 桌面版）",
+  "description": "高中必背 3600 词 · 背单词（网站 + 单文件离线版 + 手机 App + 桌面 App）",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:offline": "tsc -b && vite build --mode offline && node scripts/make-offline.mjs",
-    "build:app": "npm run build && tauri build",
+    "build:webapp": "tsc -b && vite build --mode app",
+    "build:app": "npm run build:webapp && cap sync android",
+    "android": "npm run build:app && cd android && gradlew.bat assembleDebug",
+    "android:open": "cap open android",
+    "build:desktop": "npm run build && tauri build",
     "tauri": "tauri",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
     "@tauri-apps/cli": "^2.1.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

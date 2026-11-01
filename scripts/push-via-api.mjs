@@ -52,22 +52,33 @@ async function api(method, endpoint, body) {
   return data
 }
 
-/** 递归列出要提交的文件（遵守 .gitignore 的关键条目） */
-function listFiles(dir, base = '') {
-  const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'dist-offline', '.vite', 'target', 'shots'])
-  const out = []
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const rel = base ? `${base}/${entry.name}` : entry.name
-    if (entry.isDirectory()) {
-      if (IGNORE_DIRS.has(entry.name)) continue
-      out.push(...listFiles(path.join(dir, entry.name), rel))
-    } else {
-      if (entry.name === 'tsconfig.tsbuildinfo') continue
-      if (rel.startsWith('data/raw/ecdict.csv')) continue
-      out.push(rel)
-    }
+/**
+ * 列出要提交的文件：以 git 的视角为准（尊重 .gitignore），
+ * 再补上被 git 忽略但需要强制提交的文件（如 APK）。
+ * 这样可以避免把 android/app/build、.gradle 之类的产物传上去。
+ */
+const FORCE_INCLUDE = ['背单词.apk']
+
+function listFiles() {
+  const out = execSync('git ls-files -z --cached --others --exclude-standard', {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
+    .split('\0')
+    .map((s) => s.trim().replace(/\\/g, '/'))
+    .filter(Boolean)
+
+  const set = new Set(out)
+  for (const f of FORCE_INCLUDE) {
+    if (fs.existsSync(f)) set.add(f)
   }
-  return out
+  // 过滤掉不应提交的
+  return [...set].filter(
+    (rel) =>
+      !rel.endsWith('tsconfig.tsbuildinfo') &&
+      !rel.startsWith('data/raw/ecdict.csv') &&
+      fs.existsSync(path.join(process.cwd(), rel)),
+  )
 }
 
 async function main() {
@@ -87,7 +98,7 @@ async function main() {
   }
   console.log(`  远端文件 ${remoteBlobs.size} 个`)
 
-  const files = listFiles(process.cwd())
+  const files = listFiles()
   console.log(`本地待比对文件 ${files.length} 个`)
 
   const treeEntries = []

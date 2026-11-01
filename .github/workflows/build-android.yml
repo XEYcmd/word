@@ -1,0 +1,69 @@
+name: Build Android APK
+
+# 手动触发或打 tag 时自动构建 APK 并上传到 Release。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets (app mode)
+        run: npm run build:webapp
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Generate Android assets
+        run: python3 scripts/make_android_assets.py || echo "图标生成跳过（可选）"
+
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Build release APK (unsigned)
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon || echo "release 构建跳过（未配置签名）"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: word-app-android
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/app/build/outputs/apk/debug/*.apk
+          draft: true

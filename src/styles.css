@@ -1027,10 +1027,16 @@ a {
   gap: 8px;
   height: 140px;
   padding-top: 10px;
+  /* 手机上柱子多，允许横向滚动而不是把页面撑破 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 
 .bar-col {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 22px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1051,6 +1057,7 @@ a {
 .bar-label {
   font-size: 11px;
   color: var(--text-3);
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------- 设置 */
@@ -1144,15 +1151,29 @@ a {
   }
 
   .content {
-    padding: 16px 14px 90px;
+    padding: 14px 14px calc(84px + env(safe-area-inset-bottom));
   }
 
   .topbar {
-    padding: 12px 16px;
+    padding: 10px 14px;
+    padding-top: calc(10px + env(safe-area-inset-top));
+    /* App 内状态栏透明，顶栏加一层渐变让状态栏文字可读 */
+    background: linear-gradient(
+      to bottom,
+      var(--card) 0%,
+      var(--card) calc(100% - 0px),
+      color-mix(in srgb, var(--card) 80%, transparent) 100%
+    );
   }
 
   .topbar h1 {
-    font-size: 16px;
+    font-size: 17px;
+  }
+
+  /* 顶栏按钮在手机上更紧凑，避免挤占标题 */
+  .topbar .btn-sm {
+    padding: 8px 12px;
+    font-size: 13px;
   }
 
   .mobile-nav {
@@ -1161,7 +1182,8 @@ a {
     bottom: 0;
     left: 0;
     right: 0;
-    background: var(--card);
+    background: color-mix(in srgb, var(--card) 92%, transparent);
+    backdrop-filter: blur(12px);
     border-top: 1px solid var(--border);
     padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
     z-index: 30;
@@ -1170,22 +1192,77 @@ a {
 
   .mobile-nav .nav-item {
     flex-direction: column;
-    gap: 2px;
-    font-size: 10px;
-    padding: 6px 8px;
+    gap: 3px;
+    font-size: 11px;
+    padding: 7px 8px;
+    min-height: 48px;
     width: auto;
     flex: 1;
     border-radius: 10px;
   }
 
   .mobile-nav .nav-icon {
-    font-size: 18px;
+    font-size: 19px;
     width: auto;
   }
 
+  /* ---- 触控目标：手指友好，统一 >= 42px ---- */
+  .chip {
+    padding: 8px 13px;
+    min-height: 38px;
+    font-size: 13px;
+  }
+
+  .btn {
+    min-height: 42px;
+  }
+
+  .btn-sm {
+    min-height: 38px;
+    padding: 8px 13px;
+  }
+
+  .btn-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .select {
+    min-height: 42px;
+    padding: 9px 12px;
+  }
+
+  .number-input {
+    min-height: 42px;
+  }
+
+  .star-btn {
+    min-width: 40px;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+  }
+
+  .option {
+    padding: 15px 16px;
+    min-height: 56px;
+  }
+
+  /* ---- 学习卡片 ---- */
   .word-card {
-    min-height: 260px;
-    padding: 26px 20px;
+    min-height: 250px;
+    padding: 24px 18px;
+  }
+
+  .word-main {
+    font-size: 36px;
+  }
+
+  .word-trans {
+    font-size: 18px;
+    max-width: 100%;
   }
 
   .grade-row {
@@ -1193,20 +1270,211 @@ a {
   }
 
   .grade-btn {
-    padding: 11px 4px;
-    font-size: 13px;
+    padding: 14px 4px;
+    min-height: 56px;
+    font-size: 14px;
   }
 
   .grade-btn small {
     display: none;
   }
 
+  /* ---- 步骤条：手机上更紧凑 ---- */
+  .stepper {
+    gap: 0;
+  }
+
+  .step {
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 8px 2px;
+    text-align: center;
+  }
+
+  .step-text {
+    align-items: center;
+  }
+
+  .step-text small {
+    display: none;
+  }
+
+  .step-text b {
+    font-size: 12px;
+  }
+
+  .step-dot {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+  }
+
+  /* ---- 测试卡片 ---- */
   .quiz-card {
     padding: 20px 16px;
+    gap: 14px;
+  }
+
+  .quiz-prompt {
+    font-size: 28px;
+  }
+
+  .spell-input {
+    font-size: 20px;
+    padding: 14px 16px;
+  }
+
+  .feedback {
+    flex-wrap: wrap;
+    font-size: 13px;
+    padding: 11px 13px;
   }
 
   .stat-grid {
-    gap: 8px;
+    gap: 10px;
+  }
+
+  .stat {
+    padding: 12px 14px;
+  }
+
+  .stat-value {
+    font-size: 20px;
+  }
+
+  /* ---- 词库列表：手机上改成两行，释义不再被挤没 ---- */
+  .word-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      'word actions'
+      'trans actions';
+    gap: 2px 10px;
+    padding: 12px 14px;
+    align-items: center;
+  }
+
+  .word-row > div:first-child {
+    grid-area: word;
+    min-width: 0 !important;
+  }
+
+  .word-row-word {
+    font-size: 17px;
+    min-width: 0;
+  }
+
+  .word-row-trans {
+    grid-area: trans;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    font-size: 13px;
+    line-height: 1.45;
+    word-break: break-word;
+  }
+
+  .word-row > .row:last-child {
+    grid-area: actions;
+    gap: 2px;
+  }
+
+  /* 手机上隐藏词库行里的「核心/拓展」标签，省出空间给释义 */
+  .word-row .tag {
+    display: none;
+  }
+
+  /* ---- 统计页 ---- */
+  .bar-chart {
+    gap: 6px;
+    height: 120px;
+  }
+
+  .bar-col {
+    min-width: 26px;
+  }
+
+  .heatmap {
+    padding-bottom: 10px;
+  }
+
+  /* ---- 设置页 ---- */
+  .setting-row {
+    gap: 12px;
+    padding: 12px 0;
+  }
+
+  .setting-label {
+    font-size: 14px;
+  }
+
+  .switch {
+    width: 48px;
+    height: 28px;
+  }
+
+  .switch::after {
+    width: 22px;
+    height: 22px;
+  }
+
+  .switch.on::after {
+    transform: translateX(20px);
+  }
+
+  input[type='range'] {
+    width: 110px !important;
+  }
+}
+
+/* 超小屏（iPhone SE 等）进一步压缩 */
+@media (max-width: 380px) {
+  .content {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .word-main {
+    font-size: 30px;
+  }
+
+  .quiz-prompt {
+    font-size: 24px;
+  }
+
+  .step-text b {
+    font-size: 11px;
+  }
+
+  .grade-btn {
+    font-size: 12px;
+    padding: 12px 2px;
+  }
+
+  .mobile-nav .nav-item {
+    font-size: 10px;
+    padding: 6px 4px;
+  }
+}
+
+/* 横屏手机：减少纵向占用 */
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 500px) {
+  .word-card {
+    min-height: 190px;
+    padding: 16px;
+  }
+
+  .word-main {
+    font-size: 28px;
+  }
+
+  .stepper {
+    display: none;
+  }
+
+  .content {
+    padding-bottom: calc(70px + env(safe-area-inset-bottom));
   }
 }
 
