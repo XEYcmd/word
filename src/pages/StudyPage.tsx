@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Word } from '../types'
-import { letterList, unitList } from '../lib/bank'
+import { letterList, unitList, allWords } from '../lib/bank'
 import { useApp } from '../lib/store'
 import { speak } from '../lib/speech'
-import { mulberry32, pickDistractors } from '../lib/groups'
+import { mulberry32, buildOptions } from '../lib/groups'
 import type { Grade } from '../lib/storage'
 import {
   STAGE_META,
@@ -121,21 +121,22 @@ export default function StudyPage() {
   }, [stage, revealed, studyWord, finishedStudy, iStudy, words])
 
   // ------------------------------------------------------------ 第二关：选择题
+  // 方向：英→中（看单词选释义）/ 中→英（看释义选单词）
+  const [direction, setDirection] = useState<'en2cn' | 'cn2en'>('en2cn')
+
   const choiceQuestions = useMemo(() => {
     if (words.length === 0) return []
-    const rng = mulberry32(Number(session.date.replace(/-/g, '')))
+    // 方向不同用不同种子，避免两种题型的选项顺序完全一样
+    const rng = mulberry32(Number(session.date.replace(/-/g, '')) + (direction === 'cn2en' ? 991 : 0))
     const ordered = shuffleForToday(words, 7)
-    const used = new Set<string>()
     return ordered.map((word) => {
-      const distractors = pickDistractors(word, words, 12, rng)
-        .filter((d) => !used.has(d.trans) && d.trans !== word.trans)
-        .slice(0, 3)
-      used.add(word.trans)
-      for (const d of distractors) used.add(d.trans)
-      const options = shuffleForToday([word, ...distractors], Math.floor(rng() * 1e6))
+      // 固定 4 个选项：本批词不够时从全词库补足；
+      // buildOptions 会排除与正确答案释义重合的词，保证只有一个选项说得通
+      const raw = buildOptions(word, words, 4, rng, allWords)
+      const options = shuffleForToday(raw, Math.floor(rng() * 1e6))
       return { word, options, answerIndex: options.findIndex((o) => o.id === word.id) }
     })
-  }, [words, session.date])
+  }, [words, session.date, direction])
 
   const [picked, setPicked] = useState<number | null>(null)
   const [choiceAnswered, setChoiceAnswered] = useState(false)
@@ -491,19 +492,56 @@ export default function StudyPage() {
         </div>
 
         <div className="card quiz-card">
-          <div className="row" style={{ justifyContent: 'center', gap: 10 }}>
-            <div className="quiz-prompt">{choiceQ.word.word}</div>
-            <button
-              className="btn btn-icon btn-ghost"
-              onClick={() => speakWord(choiceQ.word)}
-            >
-              🔊
-            </button>
+          <div className="row" style={{ justifyContent: 'center', gap: 8, marginBottom: 4 }}>
+            {(
+              [
+                ['en2cn', '英 → 中'],
+                ['cn2en', '中 → 英'],
+              ] as ['en2cn' | 'cn2en', string][]
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                className={`chip ${direction === k ? 'active' : ''}`}
+                onClick={() => {
+                  setDirection(k)
+                  setPicked(null)
+                  setChoiceAnswered(false)
+                  setFinishedChoice(false)
+                }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <div className="quiz-prompt-sub">
-            {choiceQ.word.phonetic && `/${choiceQ.word.phonetic}/ · `}
-            选出正确的中文意思（{iChoice + 1}/{choiceQuestions.length}）
-          </div>
+
+          {direction === 'en2cn' ? (
+            <>
+              <div className="row" style={{ justifyContent: 'center', gap: 10 }}>
+                <div className="quiz-prompt">{choiceQ.word.word}</div>
+                <button
+                  className="btn btn-icon btn-ghost"
+                  onClick={() => speakWord(choiceQ.word)}
+                >
+                  🔊
+                </button>
+              </div>
+              <div className="quiz-prompt-sub">
+                {choiceQ.word.phonetic && `/${choiceQ.word.phonetic}/ · `}
+                {choiceQ.word.pos && <b>{choiceQ.word.pos} </b>}
+                选出正确的中文意思（{iChoice + 1}/{choiceQuestions.length}）
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="quiz-prompt" style={{ fontSize: 28 }}>
+                {choiceQ.word.trans}
+              </div>
+              <div className="quiz-prompt-sub">
+                {choiceQ.word.pos && <b>{choiceQ.word.pos} </b>}
+                选出对应的英文单词（{iChoice + 1}/{choiceQuestions.length}）
+              </div>
+            </>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {choiceQ.options.map((o, i) => {
@@ -522,7 +560,21 @@ export default function StudyPage() {
                   disabled={choiceAnswered}
                 >
                   <span className="option-key">{i + 1}</span>
-                  <span style={{ flex: 1 }}>{o.trans}</span>
+                  {direction === 'en2cn' ? (
+                    <span style={{ flex: 1 }}>
+                      {o.pos && <span className="dim" style={{ fontSize: 12 }}>{o.pos} </span>}
+                      {o.trans}
+                    </span>
+                  ) : (
+                    <span style={{ flex: 1 }}>
+                      <span style={{ fontWeight: 600 }}>{o.word}</span>
+                      {o.phonetic && (
+                        <span className="dim" style={{ fontSize: 12, marginLeft: 8 }}>
+                          /{o.phonetic}/
+                        </span>
+                      )}
+                    </span>
+                  )}
                   {choiceAnswered && isAnswer && <span style={{ color: 'var(--green)' }}>✓</span>}
                   {choiceAnswered && isPicked && !isAnswer && (
                     <span style={{ color: 'var(--red)' }}>✗</span>
@@ -537,7 +589,8 @@ export default function StudyPage() {
               <span style={{ flexShrink: 0 }}>{choiceOk ? '✓ 回答正确' : '✗ 答错了'}</span>
               <span style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: 13 }}>
                 <b>{choiceQ.word.word}</b>
-                {choiceQ.word.phonetic && ` /${choiceQ.word.phonetic}/`} · {choiceQ.word.trans}
+                {choiceQ.word.phonetic && ` /${choiceQ.word.phonetic}/`}
+                {choiceQ.word.pos && ` ${choiceQ.word.pos}`} · {choiceQ.word.trans}
               </span>
               <button
                 className="btn btn-sm btn-ghost"

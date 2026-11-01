@@ -1,5 +1,6 @@
 import type { Word } from '../types'
 import { allWords, firstLetter } from './bank'
+import { areSynonyms } from './synonyms'
 
 export type GroupMode = 'all' | 'core' | 'extended' | 'letter' | 'unit' | 'wrong' | 'star' | 'review' | 'shuffle'
 
@@ -101,6 +102,114 @@ export function pickDistractors(target: Word, pool: Word[], n: number, rng: () =
   })
   scored.sort((a, b) => b.score - a.score)
   return scored.slice(0, n).map((s) => s.w)
+}
+
+// ---------------------------------------------------------------- 释义重合判断
+/**
+ * 把中文释义切成义项片段：'音乐，乐曲；唱片' -> ['音乐','乐曲','唱片']
+ * 去掉括号注释、虚词等噪音。
+ */
+export function glossTokens(trans: string): string[] {
+  if (!trans) return []
+  const cleaned = trans
+    .replace(/（[^）]*）/g, ' ') // 全角括号注释
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+  return cleaned
+    .split(/[；;，,、/／。.\s]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2)
+}
+
+/**
+ * 两个词的中文释义是否「意思相近」——即可能出现多个选项都对。
+ * 判据（从严）：
+ *   1) 存在完全相同的义项片段
+ *   2) 一个义项被另一个包含（长度≥2）
+ *   3) 任一对义项共享 ≥2 个汉字（如「信息」vs「新闻，消息」共享「信」）
+ */
+export function glossOverlaps(a: string, b: string): boolean {
+  const ta = glossTokens(a)
+  const tb = glossTokens(b)
+  if (ta.length === 0 || tb.length === 0) return false
+
+  const setB = new Set(tb)
+  for (const t of ta) {
+    if (setB.has(t)) return true
+  }
+
+  for (const x of ta) {
+    const charsX = new Set([...x])
+    for (const y of tb) {
+      // 包含关系：'帮助' vs '帮助，协助'
+      if (x.length >= 2 && y.includes(x)) return true
+      if (y.length >= 2 && x.includes(y)) return true
+      // 共享 ≥2 个不同汉字
+      let shared = 0
+      const seen = new Set<string>()
+      for (const ch of y) {
+        if (charsX.has(ch) && !seen.has(ch)) {
+          seen.add(ch)
+          shared += 1
+          if (shared >= 2) return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * 生成一道题的完整选项（含正确答案）。
+ * - 干扰项的释义不得与正确答案重合（否则会出现多个选项都对）
+ * - 干扰项与正确答案不能是近义词（news / information 这种）
+ * - 干扰项彼此释义也不重合、也不能互为近义词
+ * - 主词池不够时自动回退到 fallbackPool（通常是全词库），保证凑满 n 个选项
+ */
+export function buildOptions(
+  target: Word,
+  pool: Word[],
+  n: number,
+  rng: () => number,
+  fallbackPool?: Word[],
+): Word[] {
+  const need = Math.max(0, n - 1)
+  const seenTrans = [target.trans]
+  const seenIds = new Set<string>([target.id])
+  const seenWords = [target.word]
+  const picked: Word[] = []
+
+  const acceptable = (d: Word): boolean => {
+    if (seenIds.has(d.id)) return false
+    // 近义词：中→英时两个英文选项都说得通
+    for (const w of seenWords) {
+      if (areSynonyms(d.word, w)) return false
+    }
+    // 同义/近义释义：英→中时两个中文选项都说得通
+    for (const t of seenTrans) {
+      if (glossOverlaps(d.trans, t)) return false
+    }
+    return true
+  }
+
+  const collect = (from: Word[]) => {
+    if (picked.length >= need) return
+    for (const d of pickDistractors(target, from, from.length, rng)) {
+      if (picked.length >= need) break
+      if (!acceptable(d)) continue
+      seenIds.add(d.id)
+      seenWords.push(d.word)
+      seenTrans.push(d.trans)
+      picked.push(d)
+    }
+  }
+
+  collect(pool)
+  if (picked.length < need && fallbackPool && fallbackPool !== pool) {
+    collect(fallbackPool)
+  }
+
+  return [target, ...picked]
 }
 
 /** 简易可复现随机数 */
