@@ -39,8 +39,8 @@
       "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }]
     },
     {
-      "name": "测试一下",
-      "url": "./index.html#/quiz",
+      "name": "浏览词库",
+      "url": "./index.html#/list",
       "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }]
     }
   ]

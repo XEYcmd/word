@@ -36,6 +36,10 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5178,
       host: '127.0.0.1',
+      watch: {
+        // 构建产物不参与热更新监听，避免 dev 与 build 同时读写时 EBUSY
+        ignored: ['**/dist/**', '**/dist-offline/**', '**/dist-app/**', '**/src-tauri/target/**'],
+      },
     },
   }
 })

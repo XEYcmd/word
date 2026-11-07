@@ -6,16 +6,18 @@ import { speak } from '../lib/speech'
 import { mulberry32, buildOptions } from '../lib/groups'
 import type { Grade } from '../lib/storage'
 import {
+  candidateWords,
   STAGE_META,
   STAGE_ORDER,
   shuffleForToday,
   useSession,
+  type ChoiceDirection,
   type Scope,
   type Stage,
 } from '../lib/session'
 
 export default function StudyPage() {
-  const { state, answer, answerQuiz, toggleStar } = useApp()
+  const { state, answer, answerQuiz, toggleStar, addSeconds } = useApp()
   const s = state.settings
   const {
     session,
@@ -25,7 +27,10 @@ export default function StudyPage() {
     markStudied,
     setStage,
     recordChoice,
+    nextChoice: advanceChoice,
     recordSpell,
+    nextSpell: advanceSpell,
+    setDirection: changeDirection,
     reset,
   } = useSession()
 
@@ -33,15 +38,79 @@ export default function StudyPage() {
   const [letter, setLetter] = useState(session.letter)
   const [unit, setUnit] = useState(session.unit || unitList[0] || '')
 
-  // 三关各自的当前下标
+  // 三关各自的当前下标（选择题 / 拼写下标存在会话里，刷新后可续做）
   const [iStudy, setIStudy] = useState(0)
-  const [iChoice, setIChoice] = useState(0)
-  const [iSpell, setISpell] = useState(0)
   const [revealed, setRevealed] = useState(false)
   const [finishedStudy, setFinishedStudy] = useState(false)
+  const [emptyHint, setEmptyHint] = useState('')
 
   const stage = session.stage
   const hasBatch = words.length > 0
+
+  // 计时：只统计真正停留在学习页且本批已开始的时间
+  useEffect(() => {
+    if (!hasBatch) return
+    let last = Date.now()
+    const flush = () => {
+      const now = Date.now()
+      const sec = Math.floor((now - last) / 1000)
+      if (sec > 0) {
+        addSeconds(sec)
+        last = now
+      }
+    }
+    const timer = window.setInterval(() => {
+      if (!document.hidden) flush()
+    }, 30_000)
+    const onVisibility = () => {
+      if (document.hidden) flush()
+      else last = Date.now()
+    }
+    const onPageHide = () => flush()
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', onPageHide)
+      flush()
+    }
+  }, [hasBatch, addSeconds])
+
+  // 错词本 / 收藏 / 到期复习的数量，用于学习范围入口
+  const scopeCounts = useMemo(() => {
+    const now = Date.now()
+    let wrong = 0
+    let star = 0
+    let review = 0
+    for (const w of allWords) {
+      const p = state.progress[w.id]
+      if (!p) continue
+      if (p.wrongBook) wrong += 1
+      if (p.starred) star += 1
+      if (p.last > 0 && p.due <= now && !p.mastered) review += 1
+    }
+    return { wrong, star, review }
+  }, [state.progress])
+
+  const scopeOptions = useMemo<[Scope, string][]>(() => {
+    const list: [Scope, string][] = [
+      ['all', '全部词库'],
+      ['core', '核心高频'],
+      ['extended', '拓展词汇'],
+      ['letter', '按字母'],
+      ['unit', '按教材单元'],
+    ]
+    if (scopeCounts.review > 0) list.push(['review', `到期复习 ${scopeCounts.review}`])
+    if (scopeCounts.wrong > 0) list.push(['wrong', `错词本 ${scopeCounts.wrong}`])
+    if (scopeCounts.star > 0) list.push(['star', `收藏 ${scopeCounts.star}`])
+    return list
+  }, [scopeCounts])
+
+  const available = useMemo(
+    () => candidateWords(scope, { letter, unit, progress: state.progress }).length,
+    [scope, letter, unit, state.progress],
+  )
 
   // 恢复进度：如果这批词已经背过一部分，从下一个未背的开始
   useEffect(() => {
@@ -53,12 +122,19 @@ export default function StudyPage() {
   }, [session.ids.join(','), stage])
 
   const begin = () => {
-    startBatch(state, scope, { letter, unit })
+    const batch = startBatch(state, scope, { letter, unit })
     setIStudy(0)
-    setIChoice(0)
-    setISpell(0)
     setRevealed(false)
     setFinishedStudy(false)
+    setEmptyHint(
+      batch.length
+        ? ''
+        : scope === 'wrong'
+          ? '错词本还是空的，先去做几道题吧'
+          : scope === 'star'
+            ? '还没有收藏的单词，在词库里点 ☆ 就能收藏'
+            : '这个范围暂时没有可学的单词，换个范围试试',
+    )
   }
 
   // ------------------------------------------------------------ 通用
@@ -122,76 +198,77 @@ export default function StudyPage() {
 
   // ------------------------------------------------------------ 第二关：选择题
   // 方向：英→中（看单词选释义）/ 中→英（看释义选单词）
-  const [direction, setDirection] = useState<'en2cn' | 'cn2en'>('en2cn')
+  const direction = session.direction
+
+  // 本批参与测试的词：按设置里的「每组测试题量」截取，三关共用同一测试池
+  const testCount = session.testCount || Math.min(words.length, Math.max(1, s.quizSize))
+  const testWords = useMemo(
+    () => shuffleForToday(words, 7).slice(0, testCount),
+    [words, testCount],
+  )
 
   const choiceQuestions = useMemo(() => {
-    if (words.length === 0) return []
+    if (testWords.length === 0) return []
     // 方向不同用不同种子，避免两种题型的选项顺序完全一样
     const rng = mulberry32(Number(session.date.replace(/-/g, '')) + (direction === 'cn2en' ? 991 : 0))
-    const ordered = shuffleForToday(words, 7)
+    const ordered = shuffleForToday(testWords, 7)
     return ordered.map((word) => {
       // 固定 4 个选项：本批词不够时从全词库补足；
       // buildOptions 会排除与正确答案释义重合的词，保证只有一个选项说得通
-      const raw = buildOptions(word, words, 4, rng, allWords)
+      const raw = buildOptions(word, testWords, 4, rng, allWords)
       const options = shuffleForToday(raw, Math.floor(rng() * 1e6))
       return { word, options, answerIndex: options.findIndex((o) => o.id === word.id) }
     })
-  }, [words, session.date, direction])
+  }, [testWords, session.date, direction])
 
-  const [picked, setPicked] = useState<number | null>(null)
-  const [choiceAnswered, setChoiceAnswered] = useState(false)
-  const [choiceOk, setChoiceOk] = useState(false)
-  const [finishedChoice, setFinishedChoice] = useState(false)
-
+  const iChoice = session.choiceIndex
+  const finishedChoice = iChoice >= choiceQuestions.length
+  const choiceAnswered = session.choicePicked !== null
+  const choiceOk = session.choiceOk === true
   const choiceQ = choiceQuestions[iChoice]
 
   const pickOption = (i: number) => {
     if (choiceAnswered || !choiceQ) return
     const ok = i === choiceQ.answerIndex
-    setPicked(i)
-    setChoiceOk(ok)
-    setChoiceAnswered(true)
     answerQuiz(choiceQ.word, ok, { countedAs: 'review' })
-    recordChoice(ok)
+    recordChoice(i, ok)
   }
 
-  const nextChoice = () => {
-    setPicked(null)
-    setChoiceAnswered(false)
-    if (iChoice + 1 >= choiceQuestions.length) setFinishedChoice(true)
-    else setIChoice((i) => i + 1)
+  const switchDirection = (next: ChoiceDirection) => {
+    if (next === direction) return
+    if (session.choiceIndex > 0 || choiceAnswered) {
+      const ok = window.confirm('切换方向会重新开始选择题，已答记录将清零，确定吗？')
+      if (!ok) return
+    }
+    changeDirection(next)
   }
 
   // ------------------------------------------------------------ 第三关：拼写
-  const spellQuestions = useMemo(() => shuffleForToday(words, 13), [words])
+  const spellQuestions = useMemo(() => shuffleForToday(testWords, 13), [testWords])
+  const iSpell = session.spellIndex
+  const finishedSpell = iSpell >= spellQuestions.length
   const spellWord = spellQuestions[iSpell]
-  const [typed, setTyped] = useState('')
-  const [spellAnswered, setSpellAnswered] = useState(false)
-  const [spellOk, setSpellOk] = useState(false)
-  const [finishedSpell, setFinishedSpell] = useState(false)
+  const spellAnswered = session.spellOk !== null
+  const spellOk = session.spellOk === true
+  const [typed, setTyped] = useState(() => session.spellTyped)
+
+  // 切题 / 刷新 / 换一批时，把输入框恢复成会话里保存的内容
+  useEffect(() => {
+    setTyped(session.spellTyped)
+  }, [session.spellIndex, session.spellTyped])
 
   const submitSpell = () => {
     if (spellAnswered || !spellWord) return
     const norm = (x: string) => (s.ignoreCase ? x.trim().toLowerCase() : x.trim())
     const ok = norm(typed) === norm(spellWord.word)
-    setSpellOk(ok)
-    setSpellAnswered(true)
     answerQuiz(spellWord, ok, { countedAs: 'review' })
-    recordSpell(ok)
+    recordSpell(ok, typed.trim())
   }
 
   const nextSpell = () => {
     setTyped('')
-    setSpellAnswered(false)
-    if (iSpell + 1 >= spellQuestions.length) setFinishedSpell(true)
-    else setISpell((i) => i + 1)
+    advanceSpell()
   }
-
-  // 拼写关不自动朗读（会直接暴露答案），只在答完后可手动听
-  useEffect(() => {
-    if (stage !== 'spell') return
-    // 故意留空：拼写测试中朗读等于念答案
-  }, [spellWord?.id, stage])
 
   useEffect(() => {
     if (stage !== 'spell') return
@@ -218,7 +295,7 @@ export default function StudyPage() {
     const onKey = (e: KeyboardEvent) => {
       if (choiceAnswered && (e.key === 'Enter' || e.code === 'Space')) {
         e.preventDefault()
-        nextChoice()
+        advanceChoice()
         return
       }
       if (!choiceAnswered) {
@@ -235,7 +312,11 @@ export default function StudyPage() {
   const stepper = (
     <div className="stepper">
       {STAGE_ORDER.map((st, idx) => {
-        const done = idx < stageIndex || (st === 'study' && progress.study === 100)
+        const done =
+          idx < stageIndex ||
+          (st === 'study' && progress.study === 100) ||
+          (st === 'choice' && progress.choice === 100) ||
+          (st === 'spell' && progress.spell === 100)
         const active = st === stage
         const locked = !hasBatch && st !== 'study'
         return (
@@ -275,19 +356,14 @@ export default function StudyPage() {
           <div style={{ marginTop: 22 }}>
             <div className="section-title">学习范围</div>
             <div className="row wrap" style={{ gap: 8 }}>
-              {(
-                [
-                  ['all', '全部词库'],
-                  ['core', '核心高频'],
-                  ['extended', '拓展词汇'],
-                  ['letter', '按字母'],
-                  ['unit', '按教材单元'],
-                ] as [Scope, string][]
-              ).map(([k, label]) => (
+              {scopeOptions.map(([k, label]) => (
                 <button
                   key={k}
                   className={`chip ${scope === k ? 'active' : ''}`}
-                  onClick={() => setScope(k)}
+                  onClick={() => {
+                    setScope(k)
+                    setEmptyHint('')
+                  }}
                 >
                   {label}
                 </button>
@@ -323,6 +399,22 @@ export default function StudyPage() {
                 ))}
               </select>
             )}
+
+            <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>
+              当前范围 {available} 个可学单词
+              {(scope === 'wrong' || scope === 'star') && ' · 只刷这个范围'}
+              {scope === 'review' && ' · 按每日复习上限截取'}
+            </div>
+            {(emptyHint || available === 0) && (
+              <div className="feedback no" style={{ marginTop: 10 }}>
+                {emptyHint ||
+                  (scope === 'wrong'
+                    ? '错词本还是空的，先去做几道题吧'
+                    : scope === 'star'
+                      ? '还没有收藏的单词，在词库里点 ☆ 就能收藏'
+                      : '这个范围暂时没有可学的单词，换个范围试试')}
+              </div>
+            )}
           </div>
 
           <div
@@ -330,9 +422,15 @@ export default function StudyPage() {
             style={{ justifyContent: 'space-between', marginTop: 24, flexWrap: 'wrap', gap: 10 }}
           >
             <span className="dim" style={{ fontSize: 13 }}>
-              新词 {s.dailyNew} 个 · 复习上限 {s.dailyReview} 个（可在设置里改）
+              新词 {s.dailyNew} 个 · 复习上限 {s.dailyReview} 个 · 测试最多{' '}
+              {Math.min(available, s.quizSize)} 题
             </span>
-            <button className="btn btn-primary btn-lg" data-action="start-batch" onClick={begin}>
+            <button
+              className="btn btn-primary btn-lg"
+              data-action="start-batch"
+              onClick={begin}
+              disabled={available === 0}
+            >
               开始学习
             </button>
           </div>
@@ -345,7 +443,7 @@ export default function StudyPage() {
     <>
       <div className="row" style={{ width: '100%', maxWidth: 680, justifyContent: 'space-between' }}>
         <span className="dim" style={{ fontSize: 13 }}>
-          本批 {words.length} 词 · {STAGE_META[stage].label}
+          本批 {words.length} 词 · 测试 {testWords.length} 题 · {STAGE_META[stage].label}
         </span>
         <button className="btn btn-sm btn-ghost" onClick={reset}>
           换一批
@@ -475,10 +573,20 @@ export default function StudyPage() {
             <p className="muted" style={{ margin: '0 0 22px' }}>
               答对 {session.choiceRight} / {total}，正确率 <b>{rate}%</b>
               {session.choiceWrong > 0 && ` · ${session.choiceWrong} 个进了错词本`}
+              <br />
+              本组共 {choiceQuestions.length} 题
             </p>
-            <button className="btn btn-primary btn-lg" onClick={() => goStage('spell')}>
-              进入第三关 · 拼写 →
-            </button>
+            <div className="row" style={{ justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <button className="btn btn-primary btn-lg" onClick={() => goStage('spell')}>
+                进入第三关 · 拼写 →
+              </button>
+              <button
+                className="btn btn-ghost btn-lg"
+                onClick={() => changeDirection(direction === 'en2cn' ? 'cn2en' : 'en2cn')}
+              >
+                换个方向重做
+              </button>
+            </div>
           </div>
         </div>
       )
@@ -497,17 +605,12 @@ export default function StudyPage() {
               [
                 ['en2cn', '英 → 中'],
                 ['cn2en', '中 → 英'],
-              ] as ['en2cn' | 'cn2en', string][]
+              ] as [ChoiceDirection, string][]
             ).map(([k, label]) => (
               <button
                 key={k}
                 className={`chip ${direction === k ? 'active' : ''}`}
-                onClick={() => {
-                  setDirection(k)
-                  setPicked(null)
-                  setChoiceAnswered(false)
-                  setFinishedChoice(false)
-                }}
+                onClick={() => switchDirection(k)}
               >
                 {label}
               </button>
@@ -546,7 +649,7 @@ export default function StudyPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {choiceQ.options.map((o, i) => {
               const isAnswer = i === choiceQ.answerIndex
-              const isPicked = i === picked
+              const isPicked = i === session.choicePicked
               let cls = 'option'
               if (choiceAnswered) {
                 if (isAnswer) cls += ' correct'
@@ -607,7 +710,7 @@ export default function StudyPage() {
               ✅ {session.choiceRight} · ❌ {session.choiceWrong}
             </span>
             {choiceAnswered ? (
-              <button className="btn btn-primary" onClick={nextChoice}>
+              <button className="btn btn-primary" onClick={advanceChoice}>
                 {iChoice + 1 >= choiceQuestions.length ? '查看结果' : '下一题（回车）'}
               </button>
             ) : (
@@ -634,6 +737,8 @@ export default function StudyPage() {
             <h3 style={{ margin: '0 0 8px' }}>拼写完成</h3>
             <p className="muted" style={{ margin: '0 0 22px' }}>
               拼对 {session.spellRight} / {total}，正确率 <b>{rate}%</b>
+              <br />
+              本组共 {spellQuestions.length} 题
             </p>
             <button className="btn btn-primary btn-lg" onClick={() => goStage('done')}>
               查看今日总结 →
@@ -686,7 +791,9 @@ export default function StudyPage() {
             <div className={`feedback ${spellOk ? 'ok' : 'no'}`}>
               <span style={{ flexShrink: 0 }}>{spellOk ? '✓ 拼写正确' : '✗ 拼错了'}</span>
               <span style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: 13 }}>
-                {!spellOk && <span style={{ opacity: 0.75 }}>你写的「{typed.trim() || '（空）'}」· </span>}
+                {!spellOk && (
+                  <span style={{ opacity: 0.75 }}>你写的「{session.spellTyped || '（空）'}」· </span>
+                )}
                 正确：<b>{spellWord.word}</b>
                 {spellWord.phonetic && ` /${spellWord.phonetic}/`}
               </span>
@@ -727,6 +834,7 @@ export default function StudyPage() {
           <h2 style={{ margin: '8px 0 4px', fontSize: 22 }}>今天的 {words.length} 个词全部完成</h2>
           <p className="muted" style={{ margin: 0, fontSize: 14 }}>
             背单词 → 选择题 → 拼写，三关都过了
+            {testWords.length < words.length && ` · 选择题 / 拼写各抽了 ${testWords.length} 题`}
           </p>
         </div>
 

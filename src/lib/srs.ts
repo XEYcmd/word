@@ -62,7 +62,7 @@ export function schedule(p: WordProgress, grade: Grade, now = Date.now()): WordP
 /** 测试作答（选择题/拼写）：对错简化处理 */
 export function gradeQuiz(p: WordProgress, ok: boolean, now = Date.now()): WordProgress {
   if (ok) {
-    const next = schedule(p, p.step >= 2 ? 'good' : 'good', now)
+    const next = schedule(p, 'good', now)
     next.wrongBook = p.wrongBook && p.step + 1 < MASTER_STEP
     return next
   }

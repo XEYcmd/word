@@ -41,6 +41,10 @@ jobs:
         run: |
           mkdir -p dist/download
           cp "dist-offline/背单词.html" "dist/download/背单词.html"
+          # APK 一并发布，方便直接从站点下载（raw.githubusercontent 在国内常被墙）
+          if [ -f "背单词.apk" ]; then
+            cp "背单词.apk" "dist/download/背单词.apk"
+          fi
           ls -lh dist/download
 
       - uses: actions/upload-pages-artifact@v3

@@ -6,6 +6,7 @@ import {
   emptyState,
   loadState,
   saveState,
+  saveStateNow,
   type AppState,
   type Grade,
   type Settings,
@@ -41,6 +42,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveState(state)
   }, [state])
+
+  // 页面隐藏 / 关闭时立刻落盘，避免 200ms 防抖窗口内丢进度
+  useEffect(() => {
+    const flush = () => saveStateNow(stateRef.current)
+    const onVisibility = () => {
+      if (document.hidden) flush()
+    }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
 
   const bump = useCallback((fn: (draft: AppState) => void) => {
     setState((prev) => {

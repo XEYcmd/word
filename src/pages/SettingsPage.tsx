@@ -49,7 +49,7 @@ export default function SettingsPage() {
         <div className="setting-row">
           <div>
             <div className="setting-label">每组测试题量</div>
-            <div className="setting-desc">选择题 / 拼写测试每轮出题数</div>
+            <div className="setting-desc">选择题 / 拼写从本批词中抽取的题数</div>
           </div>
           <input
             className="number-input"
