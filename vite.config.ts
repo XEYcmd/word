@@ -3,15 +3,16 @@ import react from '@vitejs/plugin-react'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 
 // 三种构建：
-//   npm run build          -> 常规多文件构建，用于 GitHub Pages（base=/word/）
+//   npm run build          -> 常规多文件构建，用于 GitHub Pages / 自定义域名
 //   npm run build:offline  -> 单文件离线版（词库内嵌、资源内联，file:// 可直接打开）
-//   npm run build:app      -> 手机/桌面 App 用（base=./，资源相对路径）
+//   npm run build:app      -> 手机/桌面 App 用
 export default defineConfig(({ mode }) => {
   const offline = mode === 'offline'
   const app = mode === 'app'
 
-  // App 与离线版都用相对路径；只有 GitHub Pages 需要 /word/ 前缀
-  const base = offline || app ? './' : '/word/'
+  // 全部使用相对路径：既能部署在 /word/ 子路径，也能直接部署在自定义域名根目录。
+  // 应用使用 hash 路由，页面始终从 index.html 加载，相对路径是安全的。
+  const base = './'
 
   return {
     base,

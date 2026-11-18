@@ -4,7 +4,7 @@
 
 | 形态 | 入口 | 说明 |
 | --- | --- | --- |
-| 🌐 在线版 | <https://xeycmd.github.io/word/> | GitHub Pages 自动部署，手机/电脑浏览器直接用 |
+| 🌐 在线版 | <https://word.3600ci.ccwu.cc/> | GitHub Pages 自动部署，手机/电脑浏览器直接用（`xeycmd.github.io/word/` 会跳转到这里） |
 | 📱 PWA 安装版 | 同上，浏览器菜单「安装应用 / 添加到主屏幕」 | 装成独立 App，断网可用 |
 | 🤖 **安卓 App** | [`背单词-v1.0.1.apk`](./背单词-v1.0.1.apk)（4.1 MB） | 原生安装包，离线可用，无需浏览器 |
 | 💾 离线单文件 | [`背单词.html`](./背单词.html)（约 800 KB） | 双击即用，无需服务器、无需联网 |
@@ -30,7 +30,7 @@
 
 直接下载 [`背单词-v1.0.1.apk`](./背单词-v1.0.1.apk) 安装即可（Android 7.0+，版本 `v1.0.1`）。
 
-> `v1.0.1` 修复：今日学习量按词去重（50 个词不会再显示成 150/200）；卡片只保留「认识 / 不认识」；选择题和拼写各多一次防误触机会。旧版 `v1.0.0` 仍保留在 [`背单词-v1.0.0.apk`](./背单词-v1.0.0.apk)。
+> `v1.0.1` 修复：今日学习量按词去重（50 个词不会再显示成 150/200）；卡片只保留「认识 / 不认识」；选择题和拼写各多一次防误触机会；网页构建改为相对路径，自定义域名根目录也能正常访问。旧版 `v1.0.0` 仍保留在 [`背单词-v1.0.0.apk`](./背单词-v1.0.0.apk)。
 
 App 由 Capacitor 封装，网页资源全部内置，**完全离线**；带有原生启动屏、自适应图标、透明状态栏。
 进度同样存在本地，卸载前注意在「设置 → 导出进度」备份。
@@ -100,7 +100,7 @@ cd android && ./gradlew assembleDebug
 
 ### 在线版 / 安装成 App
 
-访问 <https://xeycmd.github.io/word/>。
+访问 <https://word.3600ci.ccwu.cc/>（`xeycmd.github.io/word/` 会自动跳转到自定义域名）。
 Chrome / Edge 地址栏右侧点「安装」，或在手机浏览器菜单里选「添加到主屏幕」，之后可像原生 App 一样全屏使用，**断网也能打开**（Service Worker 已缓存全部资源）。
 
 ### 离线单文件（推荐给没网的环境）
@@ -122,7 +122,7 @@ Chrome / Edge 地址栏右侧点「安装」，或在手机浏览器菜单里选
 
 ```bash
 npm install           # 安装依赖（已配置 npmmirror 镜像）
-npm run dev           # 开发服务器 http://127.0.0.1:5178/word/
+npm run dev           # 开发服务器 http://127.0.0.1:5178/
 npm run build         # 构建在线版 -> dist/
 npm run build:offline # 构建离线单文件 -> dist-offline/背单词.html
 npm run build:app     # 构建桌面安装包（需要 Rust）
@@ -208,7 +208,7 @@ python data/emit_ts.py       # 转成前端模块 src/data/words.ts
 ```bash
 npm run dev
 # 另开终端：用无头浏览器打开并开启调试端口
-msedge --headless=new --remote-debugging-port=9222 --user-data-dir=/tmp/e2e "http://127.0.0.1:5178/word/"
+msedge --headless=new --remote-debugging-port=9222 --user-data-dir=/tmp/e2e "http://127.0.0.1:5178/"
 node scripts/e2e.mjs
 ```
 
@@ -236,14 +236,14 @@ CDP=http://127.0.0.1:9222 node scripts/study-scope-check.mjs
 
 ```bash
 npm run build && npx vite preview --port 4179
-msedge --headless=new --remote-debugging-port=9226 --user-data-dir=/tmp/pwa "http://127.0.0.1:4179/word/"
-CDP=http://127.0.0.1:9226 node scripts/pwa-check.mjs http://127.0.0.1:4179/word/
+msedge --headless=new --remote-debugging-port=9226 --user-data-dir=/tmp/pwa "http://127.0.0.1:4179/"
+CDP=http://127.0.0.1:9226 node scripts/pwa-check.mjs http://127.0.0.1:4179/
 ```
 
 **移动端布局检查**（390px 真实视口模拟，检测横向溢出）
 
 ```bash
-CDP=http://127.0.0.1:9228 node scripts/layout-check.mjs "https://xeycmd.github.io/word/#/home"
+CDP=http://127.0.0.1:9228 node scripts/layout-check.mjs "https://word.3600ci.ccwu.cc/#/home"
 ```
 
 **选择题专项校验**
