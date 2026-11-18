@@ -95,16 +95,27 @@ async function main() {
     })()`)
     if (!head || head.texts.length === 0) break
 
-    // 先点第一个选项作答，再看哪个是正确答案
+    // 先点第一个选项作答；若第一次选错，再换一个选项完成本题
     await ev(`document.querySelectorAll('.option')[0]?.click()`)
     await sleep(200)
-    const marked = await ev(`(() => {
+    let marked = await ev(`(() => {
       const opts = [...document.querySelectorAll('.option')];
       return {
         correctIdx: opts.findIndex(o => o.classList.contains('correct')),
         count: opts.length,
       };
     })()`)
+    if (marked.correctIdx < 0) {
+      await ev(`[...document.querySelectorAll('.option')].find(o => !o.disabled)?.click()`)
+      await sleep(200)
+      marked = await ev(`(() => {
+        const opts = [...document.querySelectorAll('.option')];
+        return {
+          correctIdx: opts.findIndex(o => o.classList.contains('correct')),
+          count: opts.length,
+        };
+      })()`)
+    }
     all.push({ ...head, ...marked })
 
     const advanced = await ev(`(() => {

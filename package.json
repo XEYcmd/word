@@ -1,7 +1,7 @@
 {
   "name": "word-memory",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "高中必背 3600 词 · 背单词（网站 + 单文件离线版 + 手机 App + 桌面 App）",
   "scripts": {

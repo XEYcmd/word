@@ -45,6 +45,8 @@ export interface SessionState {
   choiceIndex: number
   choicePicked: number | null
   choiceOk: boolean | null
+  /** 选择题第一次选错的选项（还有一次机会；排除该选项后重选） */
+  choiceFirstWrong: number | null
   /** 选择题正确 / 错误数 */
   choiceRight: number
   choiceWrong: number
@@ -52,6 +54,8 @@ export interface SessionState {
   spellIndex: number
   spellOk: boolean | null
   spellTyped: string
+  /** 拼写第一次提交的错误内容（还有一次机会；同一答案不能重复提交） */
+  spellFirstTyped: string | null
   /** 拼写正确 / 错误数 */
   spellRight: number
   spellWrong: number
@@ -73,11 +77,13 @@ export function emptySession(): SessionState {
     choiceIndex: 0,
     choicePicked: null,
     choiceOk: null,
+    choiceFirstWrong: null,
     choiceRight: 0,
     choiceWrong: 0,
     spellIndex: 0,
     spellOk: null,
     spellTyped: '',
+    spellFirstTyped: null,
     spellRight: 0,
     spellWrong: 0,
   }
@@ -236,6 +242,14 @@ export function useSession() {
     setSession((s) => ({ ...s, stage }))
   }, [])
 
+  /** 选择题第一次选错：只排除该选项，不记错、不推进 */
+  const recordChoiceMiss = useCallback((picked: number) => {
+    setSession((s) => {
+      if (s.choicePicked !== null || s.choiceFirstWrong !== null) return s
+      return { ...s, choiceFirstWrong: picked }
+    })
+  }, [])
+
   const recordChoice = useCallback((picked: number, ok: boolean) => {
     setSession((s) => {
       // 同一题只记一次，避免刷新 / 重复点击导致统计膨胀
@@ -256,7 +270,16 @@ export function useSession() {
       choiceIndex: s.choiceIndex + 1,
       choicePicked: null,
       choiceOk: null,
+      choiceFirstWrong: null,
     }))
+  }, [])
+
+  /** 拼写第一次提交错误：只提示重试，不记错、不揭晓答案 */
+  const recordSpellMiss = useCallback((typed: string) => {
+    setSession((s) => {
+      if (s.spellOk !== null || s.spellFirstTyped !== null) return s
+      return { ...s, spellFirstTyped: typed }
+    })
   }, [])
 
   const recordSpell = useCallback((ok: boolean, typed: string) => {
@@ -278,6 +301,7 @@ export function useSession() {
       spellIndex: s.spellIndex + 1,
       spellOk: null,
       spellTyped: '',
+      spellFirstTyped: null,
     }))
   }, [])
 
@@ -291,6 +315,7 @@ export function useSession() {
         choiceIndex: 0,
         choicePicked: null,
         choiceOk: null,
+        choiceFirstWrong: null,
         choiceRight: 0,
         choiceWrong: 0,
       }
@@ -317,8 +342,10 @@ export function useSession() {
     startBatch,
     markStudied,
     setStage,
+    recordChoiceMiss,
     recordChoice,
     nextChoice,
+    recordSpellMiss,
     recordSpell,
     nextSpell,
     setDirection,

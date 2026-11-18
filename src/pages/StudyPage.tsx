@@ -26,8 +26,10 @@ export default function StudyPage() {
     startBatch,
     markStudied,
     setStage,
+    recordChoiceMiss,
     recordChoice,
     nextChoice: advanceChoice,
+    recordSpellMiss,
     recordSpell,
     nextSpell: advanceSpell,
     setDirection: changeDirection,
@@ -42,6 +44,7 @@ export default function StudyPage() {
   const [iStudy, setIStudy] = useState(0)
   const [revealed, setRevealed] = useState(false)
   const [finishedStudy, setFinishedStudy] = useState(false)
+  const [confirmUnknown, setConfirmUnknown] = useState(false)
   const [emptyHint, setEmptyHint] = useState('')
 
   const stage = session.stage
@@ -160,10 +163,21 @@ export default function StudyPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studyWord?.id, stage, s.autoSpeak, finishedStudy])
 
+  // 换到下一个词时，清掉上一张卡片的「不认识」确认态
+  useEffect(() => {
+    setConfirmUnknown(false)
+  }, [studyWord?.id])
+
   const gradeStudy = (g: Grade) => {
     if (!studyWord) return
-    answer(studyWord, g, { countedAs: 'learn' })
+    // 「不认识」先不记，第二次点击才确认，防止误触
+    if (g === 'again' && !confirmUnknown) {
+      setConfirmUnknown(true)
+      return
+    }
+    answer(studyWord, g)
     markStudied(studyWord.id)
+    setConfirmUnknown(false)
     setRevealed(false)
     if (iStudy + 1 >= words.length) {
       setFinishedStudy(true)
@@ -186,15 +200,13 @@ export default function StudyPage() {
       if (!revealed) return
       const k = e.key.toLowerCase()
       if (k === '1') gradeStudy('again')
-      else if (k === '2') gradeStudy('hard')
-      else if (k === '3') gradeStudy('good')
-      else if (k === '4') gradeStudy('easy')
+      else if (k === '2') gradeStudy('good')
       else if (k === 's') speakWord(studyWord)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, revealed, studyWord, finishedStudy, iStudy, words])
+  }, [stage, revealed, studyWord, finishedStudy, iStudy, words, confirmUnknown])
 
   // ------------------------------------------------------------ 第二关：选择题
   // 方向：英→中（看单词选释义）/ 中→英（看释义选单词）
@@ -225,18 +237,26 @@ export default function StudyPage() {
   const finishedChoice = iChoice >= choiceQuestions.length
   const choiceAnswered = session.choicePicked !== null
   const choiceOk = session.choiceOk === true
+  const choiceFirstWrong = session.choiceFirstWrong
+  const choiceRetrying = !choiceAnswered && choiceFirstWrong !== null
   const choiceQ = choiceQuestions[iChoice]
 
   const pickOption = (i: number) => {
     if (choiceAnswered || !choiceQ) return
+    // 第一次选错只排除该选项，给一次重选机会
+    if (i === choiceFirstWrong) return
     const ok = i === choiceQ.answerIndex
-    answerQuiz(choiceQ.word, ok, { countedAs: 'review' })
+    if (!ok && choiceFirstWrong === null) {
+      recordChoiceMiss(i)
+      return
+    }
+    answerQuiz(choiceQ.word, ok)
     recordChoice(i, ok)
   }
 
   const switchDirection = (next: ChoiceDirection) => {
     if (next === direction) return
-    if (session.choiceIndex > 0 || choiceAnswered) {
+    if (session.choiceIndex > 0 || choiceAnswered || choiceFirstWrong !== null) {
       const ok = window.confirm('切换方向会重新开始选择题，已答记录将清零，确定吗？')
       if (!ok) return
     }
@@ -250,18 +270,30 @@ export default function StudyPage() {
   const spellWord = spellQuestions[iSpell]
   const spellAnswered = session.spellOk !== null
   const spellOk = session.spellOk === true
-  const [typed, setTyped] = useState(() => session.spellTyped)
+  const spellFirstTyped = session.spellFirstTyped
+  const spellRetrying = !spellAnswered && spellFirstTyped !== null
+  const [typed, setTyped] = useState(() => session.spellTyped || session.spellFirstTyped || '')
 
-  // 切题 / 刷新 / 换一批时，把输入框恢复成会话里保存的内容
+  // 切题 / 刷新 / 换一批时，把输入框恢复成会话里保存的内容；
+  // 第一次拼错后刷新，也把那次的内容带回来，继续阻止重复提交。
   useEffect(() => {
-    setTyped(session.spellTyped)
-  }, [session.spellIndex, session.spellTyped])
+    setTyped(session.spellTyped || session.spellFirstTyped || '')
+  }, [session.spellIndex, session.spellTyped, session.spellFirstTyped])
+
+  const normSpell = (x: string) => (s.ignoreCase ? x.trim().toLowerCase() : x.trim())
+  // 第一次拼错后，同一个答案不能直接重复提交，必须改一下
+  const canSubmitSpell =
+    !!typed.trim() && !(spellFirstTyped !== null && normSpell(typed) === normSpell(spellFirstTyped))
 
   const submitSpell = () => {
-    if (spellAnswered || !spellWord) return
-    const norm = (x: string) => (s.ignoreCase ? x.trim().toLowerCase() : x.trim())
-    const ok = norm(typed) === norm(spellWord.word)
-    answerQuiz(spellWord, ok, { countedAs: 'review' })
+    if (spellAnswered || !spellWord || !canSubmitSpell) return
+    const ok = normSpell(typed) === normSpell(spellWord.word)
+    // 第一次拼错只提示再试一次，不记错、不揭晓答案
+    if (!ok && spellFirstTyped === null) {
+      recordSpellMiss(typed.trim())
+      return
+    }
+    answerQuiz(spellWord, ok)
     recordSpell(ok, typed.trim())
   }
 
@@ -288,7 +320,7 @@ export default function StudyPage() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, spellAnswered, typed, iSpell, spellQuestions])
+  }, [stage, spellAnswered, spellFirstTyped, typed, iSpell, spellQuestions, s.ignoreCase])
 
   useEffect(() => {
     if (stage !== 'choice') return
@@ -306,7 +338,7 @@ export default function StudyPage() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, choiceAnswered, iChoice, choiceQuestions])
+  }, [stage, choiceAnswered, choiceFirstWrong, iChoice, choiceQuestions])
 
   // ------------------------------------------------------------ 渲染
   const stepper = (
@@ -528,25 +560,33 @@ export default function StudyPage() {
           ) : (
             <div className="reveal-hint">
               <span className="hidden-veil">点击显示释义</span>
-              <div style={{ marginTop: 8, fontSize: 12 }}>空格显示 · 1-4 评分</div>
+              <div style={{ marginTop: 8, fontSize: 12 }}>空格显示 · 1 不认识 / 2 认识</div>
             </div>
           )}
         </div>
 
         {revealed ? (
-          <div className="grade-row">
-            <button className="grade-btn grade-again" onClick={() => gradeStudy('again')}>
-              忘记<small>1</small>
-            </button>
-            <button className="grade-btn grade-hard" onClick={() => gradeStudy('hard')}>
-              模糊<small>2</small>
-            </button>
-            <button className="grade-btn grade-good" onClick={() => gradeStudy('good')}>
-              记得<small>3</small>
-            </button>
-            <button className="grade-btn grade-easy" onClick={() => gradeStudy('easy')}>
-              太简单<small>4</small>
-            </button>
+          <div style={{ width: '100%', maxWidth: 680, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {confirmUnknown && (
+              <div className="feedback retry">
+                <span style={{ flexShrink: 0 }}>再确认一下</span>
+                <span style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: 13 }}>
+                  再点一次「不认识」才会记录；点「认识」可以撤回。
+                </span>
+              </div>
+            )}
+            <div className="grade-row">
+              <button
+                className={`grade-btn grade-again ${confirmUnknown ? 'confirm' : ''}`}
+                onClick={() => gradeStudy('again')}
+              >
+                {confirmUnknown ? '确认不认识' : '不认识'}
+                <small>1</small>
+              </button>
+              <button className="grade-btn grade-good" onClick={() => gradeStudy('good')}>
+                认识<small>2</small>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="grade-row">
@@ -650,17 +690,19 @@ export default function StudyPage() {
             {choiceQ.options.map((o, i) => {
               const isAnswer = i === choiceQ.answerIndex
               const isPicked = i === session.choicePicked
+              const isMissed = i === choiceFirstWrong
               let cls = 'option'
+              if (isMissed) cls += ' missed'
               if (choiceAnswered) {
                 if (isAnswer) cls += ' correct'
-                else if (isPicked) cls += ' wrong'
+                else if (isPicked && !isMissed) cls += ' wrong'
               }
               return (
                 <button
                   key={o.id}
                   className={cls}
                   onClick={() => pickOption(i)}
-                  disabled={choiceAnswered}
+                  disabled={choiceAnswered || isMissed}
                 >
                   <span className="option-key">{i + 1}</span>
                   {direction === 'en2cn' ? (
@@ -679,13 +721,27 @@ export default function StudyPage() {
                     </span>
                   )}
                   {choiceAnswered && isAnswer && <span style={{ color: 'var(--green)' }}>✓</span>}
-                  {choiceAnswered && isPicked && !isAnswer && (
+                  {((choiceAnswered && isPicked && !isAnswer) || (!choiceAnswered && isMissed)) && (
                     <span style={{ color: 'var(--red)' }}>✗</span>
+                  )}
+                  {!choiceAnswered && isMissed && (
+                    <span className="dim" style={{ fontSize: 12, flexShrink: 0 }}>
+                      已排除
+                    </span>
                   )}
                 </button>
               )
             })}
           </div>
+
+          {choiceRetrying && (
+            <div className="feedback retry">
+              <span style={{ flexShrink: 0 }}>还有一次机会</span>
+              <span style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: 13 }}>
+                刚才那个选项不对，已排除；换一个再选。
+              </span>
+            </div>
+          )}
 
           {choiceAnswered && (
             <div className={`feedback ${choiceOk ? 'ok' : 'no'}`}>
@@ -715,7 +771,7 @@ export default function StudyPage() {
               </button>
             ) : (
               <span className="dim" style={{ fontSize: 12 }}>
-                键盘 1-4 作答
+                {choiceRetrying ? '第一次选错不计数，已排除该选项' : '键盘 1-4 作答'}
               </span>
             )}
           </div>
@@ -776,10 +832,10 @@ export default function StudyPage() {
           </div>
 
           <input
-            className={`spell-input ${spellAnswered ? (spellOk ? 'correct' : 'wrong') : ''}`}
+            className={`spell-input ${spellAnswered ? (spellOk ? 'correct' : 'wrong') : spellRetrying ? 'retry' : ''}`}
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
-            placeholder="输入英文后按回车"
+            placeholder={spellRetrying ? '改一下拼写，再按回车' : '输入英文后按回车'}
             autoFocus
             autoCapitalize="none"
             autoCorrect="off"
@@ -787,10 +843,22 @@ export default function StudyPage() {
             disabled={spellAnswered}
           />
 
+          {spellRetrying && (
+            <div className="feedback retry">
+              <span style={{ flexShrink: 0 }}>还有一次机会</span>
+              <span style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: 13 }}>
+                拼写不对，再检查一下；改一个答案再提交，同一个答案不能重复提交。
+              </span>
+            </div>
+          )}
+
           {spellAnswered && (
             <div className={`feedback ${spellOk ? 'ok' : 'no'}`}>
               <span style={{ flexShrink: 0 }}>{spellOk ? '✓ 拼写正确' : '✗ 拼错了'}</span>
               <span style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: 13 }}>
+                {!spellOk && spellFirstTyped && spellFirstTyped !== session.spellTyped && (
+                  <span style={{ opacity: 0.75 }}>第一次「{spellFirstTyped}」 · </span>
+                )}
                 {!spellOk && (
                   <span style={{ opacity: 0.75 }}>你写的「{session.spellTyped || '（空）'}」· </span>
                 )}
@@ -812,8 +880,8 @@ export default function StudyPage() {
                 {iSpell + 1 >= spellQuestions.length ? '查看结果' : '下一个（回车）'}
               </button>
             ) : (
-              <button className="btn btn-primary" onClick={submitSpell} disabled={!typed.trim()}>
-                提交（回车）
+              <button className="btn btn-primary" onClick={submitSpell} disabled={!canSubmitSpell}>
+                {spellRetrying ? (canSubmitSpell ? '再提交一次（回车）' : '改一下再提交') : '提交（回车）'}
               </button>
             )}
           </div>

@@ -765,13 +765,10 @@ a {
   background: var(--red-soft);
 }
 
-.grade-hard {
-  color: var(--amber);
-  border-color: color-mix(in srgb, var(--amber) 35%, var(--border));
-}
-
-.grade-hard:hover {
-  background: var(--amber-soft);
+.grade-again.confirm {
+  background: var(--red-soft);
+  border-style: dashed;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 12%, transparent);
 }
 
 .grade-good {
@@ -781,15 +778,6 @@ a {
 
 .grade-good:hover {
   background: var(--brand-soft);
-}
-
-.grade-easy {
-  color: var(--green);
-  border-color: color-mix(in srgb, var(--green) 35%, var(--border));
-}
-
-.grade-easy:hover {
-  background: var(--green-soft);
 }
 
 /* ---------------------------------------------------------------- 测试 */
@@ -869,6 +857,18 @@ a {
   color: #fff;
 }
 
+/* 第一次选错的选项：排除但不算最终错误 */
+.option.missed {
+  border-color: color-mix(in srgb, var(--red) 30%, var(--border));
+  background: color-mix(in srgb, var(--red-soft) 55%, var(--card));
+  opacity: 0.72;
+}
+
+.option.missed .option-key {
+  background: color-mix(in srgb, var(--red) 60%, var(--bg-soft));
+  color: #fff;
+}
+
 .spell-input {
   width: 100%;
   padding: 16px 20px;
@@ -898,6 +898,12 @@ a {
   background: var(--red-soft);
 }
 
+/* 第一次拼错：提示重试，但还不揭晓答案 */
+.spell-input.retry {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+}
+
 .feedback {
   display: flex;
   align-items: center;
@@ -917,6 +923,12 @@ a {
 .feedback.no {
   background: var(--red-soft);
   color: var(--red);
+}
+
+/* 第一次答错的机会提示 */
+.feedback.retry {
+  background: var(--amber-soft);
+  color: var(--amber);
 }
 
 @keyframes pop {

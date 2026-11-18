@@ -105,9 +105,13 @@ async function main() {
     }
   })
 
-  // 干净状态开始一批
+  // 干净状态开始一批（用一次性脚本在重载前清空，避免 pagehide 写回旧状态）
   await goto('#/home')
-  await ev(`localStorage.removeItem('word-session-v1'); localStorage.removeItem('word-memory-v1'); true`)
+  const { identifier } = await send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `try { localStorage.removeItem('word-session-v1'); localStorage.removeItem('word-memory-v1'); } catch (e) {}`,
+  })
+  await reload()
+  await send('Page.removeScriptToEvaluateOnNewDocument', { identifier })
   await goto('#/study')
   await ev(`document.querySelector('[data-action="start-batch"]')?.click()`)
   await sleep(900)
@@ -117,8 +121,39 @@ async function main() {
   const q1 = await promptText()
   await ev(`document.querySelectorAll('.option')[0]?.click()`)
   await sleep(500)
-  const s1 = await session()
-  const fb1 = await ev(`document.querySelector('.feedback')?.textContent || ''`)
+  let s1 = await session()
+  if (s1.choicePicked === null) {
+    const retryFb = await ev(`document.querySelector('.feedback.retry')?.textContent || ''`)
+    const firstWrong = s1.choiceFirstWrong
+    check(
+      '选择题首错进入重试态',
+      s1.choiceIndex === 0 && firstWrong !== null && retryFb.includes('机会'),
+      `firstWrong=${firstWrong}, hint=${!!retryFb}`,
+    )
+
+    // 刷新后重试态也要保留：错误选项仍被排除，正确答案仍未揭晓
+    await reload()
+    const s1Retry = await session()
+    const retryFbR = await ev(`document.querySelector('.feedback.retry')?.textContent || ''`)
+    const missed = await ev(`document.querySelectorAll('.option.missed').length`)
+    const missedDisabled = await ev(
+      `document.querySelectorAll('.option')[${firstWrong}]?.disabled ?? false`,
+    )
+    check(
+      '选择题重试态刷新后保留',
+      s1Retry.choiceFirstWrong === firstWrong &&
+        s1Retry.choicePicked === null &&
+        retryFbR.includes('机会') &&
+        missed === 1 &&
+        missedDisabled === true,
+      `firstWrong=${s1Retry.choiceFirstWrong}, missed=${missed}, disabled=${missedDisabled}`,
+    )
+
+    await ev(`[...document.querySelectorAll('.option')].find(o => !o.disabled)?.click()`)
+    await sleep(500)
+    s1 = await session()
+  }
+  const fb1 = await ev(`document.querySelector('.feedback:not(.retry)')?.textContent || ''`)
   check(
     '选择题答题已记录',
     s1.choiceIndex === 0 && s1.choicePicked !== null && !!fb1,
@@ -128,7 +163,7 @@ async function main() {
   await reload()
   const q1r = await promptText()
   const s1r = await session()
-  const fb1r = await ev(`document.querySelector('.feedback')?.textContent || ''`)
+  const fb1r = await ev(`document.querySelector('.feedback:not(.retry)')?.textContent || ''`)
   check(
     '选择题刷新后停在同一题',
     q1r === q1 && !!fb1r,
@@ -160,8 +195,41 @@ async function main() {
   await typeSpell('zzzz')
   await ev(`[...document.querySelectorAll('button')].find(b => /提交/.test(b.textContent))?.click()`)
   await sleep(500)
-  const sp1 = await session()
-  const spellFb = await ev(`document.querySelector('.feedback')?.textContent || ''`)
+  let sp1 = await session()
+  const retryFb = await ev(`document.querySelector('.feedback.retry')?.textContent || ''`)
+  const sameDisabled = await ev(
+    `[...document.querySelectorAll('button')].find(b => /提交/.test(b.textContent))?.disabled ?? false`,
+  )
+  check(
+    '拼写首错进入重试态',
+    sp1.spellIndex === 0 && sp1.spellOk === null && sp1.spellFirstTyped === 'zzzz' && retryFb.includes('机会'),
+    `index=${sp1.spellIndex}, ok=${sp1.spellOk}, first=${sp1.spellFirstTyped}, sameDisabled=${sameDisabled}`,
+  )
+
+  // 刷新后重试态也要保留：输入内容带回来，同一个答案仍不能提交
+  await reload()
+  const sp1Retry = await session()
+  const retryFbR = await ev(`document.querySelector('.feedback.retry')?.textContent || ''`)
+  const retryInput = await ev(`document.querySelector('.spell-input')?.value || ''`)
+  const sameDisabledR = await ev(
+    `[...document.querySelectorAll('button')].find(b => /提交/.test(b.textContent))?.disabled ?? false`,
+  )
+  check(
+    '拼写重试态刷新后保留',
+    sp1Retry.spellFirstTyped === 'zzzz' &&
+      sp1Retry.spellOk === null &&
+      retryFbR.includes('机会') &&
+      retryInput === 'zzzz' &&
+      sameDisabledR === true,
+    `first=${sp1Retry.spellFirstTyped}, input=${retryInput}, sameDisabled=${sameDisabledR}`,
+  )
+
+  // 改一个不同的错误答案，第二次才记录
+  await typeSpell('qqqq')
+  await ev(`[...document.querySelectorAll('button')].find(b => /提交/.test(b.textContent))?.click()`)
+  await sleep(500)
+  sp1 = await session()
+  const spellFb = await ev(`document.querySelector('.feedback:not(.retry)')?.textContent || ''`)
   check(
     '拼写答题已记录',
     sp1.spellIndex === 0 && sp1.spellOk === false && !!spellFb,
@@ -171,7 +239,7 @@ async function main() {
   await reload()
   const spellPromptR = await promptText()
   const sp1r = await session()
-  const spellFbR = await ev(`document.querySelector('.feedback')?.textContent || ''`)
+  const spellFbR = await ev(`document.querySelector('.feedback:not(.retry)')?.textContent || ''`)
   const inputDisabled = await ev(`document.querySelector('.spell-input')?.disabled ?? false`)
   check(
     '拼写刷新后保留反馈',

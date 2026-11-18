@@ -57,7 +57,7 @@ async function api(method, endpoint, body) {
  * 再补上被 git 忽略但需要强制提交的文件（如 APK）。
  * 这样可以避免把 android/app/build、.gradle 之类的产物传上去。
  */
-const FORCE_INCLUDE = ['背单词.apk']
+const FORCE_INCLUDE = ['背单词.apk', '背单词-v1.0.0.apk', '背单词-v1.0.1.apk']
 
 function listFiles() {
   const out = execSync('git ls-files -z --cached --others --exclude-standard', {

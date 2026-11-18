@@ -63,6 +63,11 @@ async function goto(hash) {
   await sleep(1200)
 }
 
+async function reload() {
+  await send('Page.reload')
+  await sleep(1500)
+}
+
 /** 点击文本包含指定内容的按钮 */
 async function clickByText(text, selector = 'button') {
   return evaluate(`(() => {
@@ -101,8 +106,13 @@ async function main() {
   const recommendCount = await evaluate(`document.querySelectorAll('.word-row').length`)
   check('推荐词列表', recommendCount > 0, `${recommendCount} 条`)
 
-  // 清空旧会话，保证从干净状态开始
-  await evaluate(`localStorage.removeItem('word-session-v1'); true`)
+  // 清空旧会话和进度，保证从干净状态开始（不继承上一套测试的设置）
+  // 用一次性脚本在重载前清空，避免旧页面的 pagehide 把状态写回来
+  const { identifier } = await send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `try { localStorage.removeItem('word-session-v1'); localStorage.removeItem('word-memory-v1'); } catch (e) {}`,
+  })
+  await reload()
+  await send('Page.removeScriptToEvaluateOnNewDocument', { identifier })
   await goto('#/study')
 
   // ============================================================ 2. 第一关：背单词
@@ -125,9 +135,32 @@ async function main() {
   check('第一关显示释义', !!trans1, trans1.slice(0, 22))
 
   const gradeBtns = await evaluate(`document.querySelectorAll('.grade-btn').length`)
-  check('四档评分按钮', gradeBtns === 4, `${gradeBtns} 个`)
+  const gradeLabels = await evaluate(
+    `[...document.querySelectorAll('.grade-btn')].map(b => b.textContent.trim())`,
+  )
+  check(
+    '两档评分按钮',
+    gradeBtns === 2 &&
+      gradeLabels.some((l) => l.includes('不认识')) &&
+      gradeLabels.some((l) => l.includes('认识')),
+    gradeLabels.join(' | '),
+  )
 
-  // 评分推进
+  // 「不认识」第一次点击只确认，不记录
+  await evaluate(`document.querySelector('.grade-again')?.click()`)
+  await sleep(350)
+  const wordAfterMiss = await evaluate(`document.querySelector('.word-main')?.textContent || ''`)
+  const confirmHint = await evaluate(`document.querySelector('.feedback.retry')?.textContent || ''`)
+  const studiedAfterMiss = await evaluate(
+    `(JSON.parse(localStorage.getItem('word-session-v1') || '{}').studied || []).length`,
+  )
+  check(
+    '不认识需二次确认',
+    wordAfterMiss === word1 && studiedAfterMiss === 0 && confirmHint.includes('再确认'),
+    `word=${wordAfterMiss}, studied=${studiedAfterMiss}, hint=${!!confirmHint}`,
+  )
+
+  // 点「认识」撤回并推进
   await evaluate(`document.querySelector('.grade-good')?.click()`)
   await sleep(500)
   const word2 = await evaluate(`document.querySelector('.word-main')?.textContent || ''`)
@@ -160,8 +193,21 @@ async function main() {
 
   await evaluate(`document.querySelectorAll('.option')[0].click()`)
   await sleep(500)
-  const feedback = await evaluate(`document.querySelector('.feedback')?.textContent || ''`)
-  check('选择题即时反馈', !!feedback, feedback.replace(/\s+/g, ' ').slice(0, 34))
+  let feedback = await evaluate(`document.querySelector('.feedback:not(.retry)')?.textContent || ''`)
+  const choiceRetry = await evaluate(`document.querySelector('.feedback.retry')?.textContent || ''`)
+  if (!feedback) {
+    const excluded = await evaluate(`document.querySelectorAll('.option.missed').length`)
+    check(
+      '选择题首次选错可重试',
+      choiceRetry.includes('机会') && excluded === 1,
+      `hint=${!!choiceRetry}, excluded=${excluded}`,
+    )
+    // 换一个未被排除的选项完成本题
+    await evaluate(`[...document.querySelectorAll('.option')].find(o => !o.disabled)?.click()`)
+    await sleep(500)
+    feedback = await evaluate(`document.querySelector('.feedback:not(.retry)')?.textContent || ''`)
+  }
+  check('选择题最终反馈', !!feedback, feedback.replace(/\s+/g, ' ').slice(0, 34))
 
   await clickByText('下一题')
   await sleep(400)
@@ -191,8 +237,32 @@ async function main() {
     await sleep(200)
     await clickByText('提交')
     await sleep(500)
-    const spellFb = await evaluate(`document.querySelector('.feedback')?.textContent || ''`)
-    check('拼写判错并显示正确答案', spellFb.includes('拼错') && spellFb.includes('正确'), spellFb.replace(/\s+/g, ' ').slice(0, 40))
+    const spellRetry = await evaluate(`document.querySelector('.feedback.retry')?.textContent || ''`)
+    const sameDisabled = await evaluate(
+      `[...document.querySelectorAll('button')].find(b => /提交/.test(b.textContent))?.disabled ?? false`,
+    )
+    check(
+      '拼写首次拼错可重试',
+      spellRetry.includes('机会') && sameDisabled === true,
+      `hint=${!!spellRetry}, sameDisabled=${sameDisabled}`,
+    )
+
+    // 改一个不同的错误答案，第二次才记录并揭晓
+    await evaluate(`(() => {
+      const inp = document.querySelector('.spell-input');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(inp, 'definitelywrong2');
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`)
+    await sleep(250)
+    await clickByText('提交')
+    await sleep(500)
+    const spellFb = await evaluate(`document.querySelector('.feedback:not(.retry)')?.textContent || ''`)
+    check(
+      '拼写第二次判错并显示正确答案',
+      spellFb.includes('拼错') && spellFb.includes('正确'),
+      spellFb.replace(/\s+/g, ' ').slice(0, 40),
+    )
   }
 
   // ============================================================ 5. 完成页

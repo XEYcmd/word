@@ -17,9 +17,9 @@ import { newProgress, schedule, gradeQuiz, removeFromWrongBook } from './srs'
 interface Ctx {
   state: AppState
   /** 记录一次作答（卡片/测试共用） */
-  answer: (word: Word, grade: Grade, opts?: { countedAs?: 'learn' | 'review' }) => void
+  answer: (word: Word, grade: Grade) => void
   /** 测试模式对错 */
-  answerQuiz: (word: Word, ok: boolean, opts?: { countedAs?: 'learn' | 'review' }) => void
+  answerQuiz: (word: Word, ok: boolean) => void
   toggleStar: (id: string) => void
   removeWrong: (id: string) => void
   updateSettings: (patch: Partial<Settings>) => void
@@ -80,14 +80,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   const record = useCallback(
-    (word: Word, next: WordProgress, countedAs: 'learn' | 'review', ok: boolean) => {
+    (word: Word, next: WordProgress, ok: boolean) => {
       bump((draft) => {
         const prev = draft.progress[word.id]
         const isFirst = !prev || prev.last === 0
+        const today = dateKey()
+        // 同一个词今天只在第一次作答时计入学习量；
+        // 选择题、拼写阶段再答对/答错都只更新正确率，不重复累加。
+        const firstToday = isFirst || dateKey(new Date(prev.last)) !== today
         draft.progress[word.id] = next
         const d = ensureToday(draft)
-        if (isFirst) d.learned += 1
-        else if (countedAs === 'review') d.reviewed += 1
+        if (firstToday) {
+          if (isFirst) d.learned += 1
+          else d.reviewed += 1
+        }
         if (ok) d.correct += 1
         else d.wrong += 1
       })
@@ -96,21 +102,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const answer = useCallback(
-    (word: Word, grade: Grade, opts?: { countedAs?: 'learn' | 'review' }) => {
+    (word: Word, grade: Grade) => {
       const prev = stateRef.current.progress[word.id] ?? newProgress(word.id)
       const next = schedule(prev, grade)
       if (grade !== 'again') next.wrongBook = prev.wrongBook && next.step < 4
-      record(word, next, opts?.countedAs ?? 'learn', grade !== 'again')
+      record(word, next, grade !== 'again')
     },
     [record],
   )
 
   const answerQuiz = useCallback(
-    (word: Word, ok: boolean, opts?: { countedAs?: 'learn' | 'review' }) => {
+    (word: Word, ok: boolean) => {
       const prev = stateRef.current.progress[word.id] ?? newProgress(word.id)
       const next = gradeQuiz(prev, ok)
       if (ok) next.wrongBook = prev.wrongBook && next.step < 4
-      record(word, next, opts?.countedAs ?? 'learn', ok)
+      record(word, next, ok)
     },
     [record],
   )

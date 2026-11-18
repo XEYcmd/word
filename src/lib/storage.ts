@@ -91,15 +91,45 @@ export function loadState(): AppState {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return emptyState()
     const parsed = JSON.parse(raw) as Partial<AppState>
-    return {
+    return repairTodayDaily({
       version: 1,
       progress: parsed.progress ?? {},
       daily: parsed.daily ?? {},
       settings: { ...DEFAULT_SETTINGS, ...(parsed.settings ?? {}) },
       lastGroup: parsed.lastGroup ?? 'all',
-    }
+    })
   } catch {
     return emptyState()
+  }
+}
+
+/**
+ * 修正旧版本留下的「今日学习量」膨胀。
+ *
+ * 旧逻辑会在背单词、选择题、拼写三个阶段都 +1，导致 50 个词显示成 150/200。
+ * 现在按 progress.last 落在今天的去重词数，重新计算 learned + reviewed 的总量；
+ * learned 已经是按词去重的，保留它，剩余部分都归入 reviewed。
+ */
+function repairTodayDaily(state: AppState): AppState {
+  const key = dateKey()
+  const stat = state.daily[key]
+  if (!stat) return state
+
+  let distinct = 0
+  for (const p of Object.values(state.progress)) {
+    if (p.last > 0 && dateKey(new Date(p.last)) === key) distinct += 1
+  }
+
+  const learned = Math.min(stat.learned, distinct)
+  const reviewed = distinct - learned
+  if (learned === stat.learned && reviewed === stat.reviewed) return state
+
+  return {
+    ...state,
+    daily: {
+      ...state.daily,
+      [key]: { ...stat, learned, reviewed },
+    },
   }
 }
 

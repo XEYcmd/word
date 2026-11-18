@@ -64,17 +64,26 @@ async function walkChoiceStage(label) {
     if (n === 0) break // 已到结果页
     counts.push({ n, prompt })
 
-    // 点击正确答案，快速推进
+    // 选第一个可用选项；如果第一次选错，再换一个选项完成本题
     await ev(`(() => {
       const opts = [...document.querySelectorAll('.option')];
       const idx = opts.findIndex(o => o.classList.contains('correct'));
-      (idx >= 0 ? opts[idx] : opts[0]).click();
+      (idx >= 0 ? opts[idx] : opts.find((o) => !o.disabled))?.click();
     })()`)
     await sleep(180)
-    const nextBtn = await ev(`(() => {
+    let nextBtn = await ev(`(() => {
       const b = [...document.querySelectorAll('button')].find(x => /下一题|查看结果/.test(x.textContent));
       if (!b) return false; b.click(); return true;
     })()`)
+    if (!nextBtn) {
+      // 第一次选错：排除该选项后重选一次
+      await ev(`[...document.querySelectorAll('.option')].find(o => !o.disabled)?.click()`)
+      await sleep(180)
+      nextBtn = await ev(`(() => {
+        const b = [...document.querySelectorAll('button')].find(x => /下一题|查看结果/.test(x.textContent));
+        if (!b) return false; b.click(); return true;
+      })()`)
+    }
     await sleep(220)
     if (!nextBtn) break
   }
